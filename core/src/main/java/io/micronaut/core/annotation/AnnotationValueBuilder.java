@@ -15,6 +15,8 @@
  */
 package io.micronaut.core.annotation;
 
+import io.micronaut.core.reflect.ReflectionUtils;
+
 import javax.annotation.Nullable;
 import java.lang.annotation.Annotation;
 import java.util.HashMap;
@@ -391,6 +393,58 @@ public class AnnotationValueBuilder<T extends Annotation> {
     public AnnotationValueBuilder<T> member(String name, @Nullable AnnotationClassValue<?>... classValues) {
         if (classValues != null) {
             values.put(name, classValues);
+        }
+        return this;
+    }
+
+    /**
+     * Adds the members from the provided map. All values must be primitives, enums,
+     * strings, annotation values, or an array of any of the previous types.
+     *
+     * @param members The map of members
+     * @return This builder
+     * @since 1.3.8
+     */
+    @NonNull
+    public AnnotationValueBuilder<T> members(@Nullable Map<CharSequence, Object> members) {
+        if (members != null) {
+            for (Map.Entry<CharSequence, Object> entry: members.entrySet()) {
+                Object value = entry.getValue();
+                if (value != null) {
+                    Class clazz = value.getClass();
+                    boolean isArray = clazz.isArray();
+                    if (isArray) {
+                        clazz = clazz.getComponentType();
+                    }
+                    boolean isValid = !clazz.isArray() &&
+                            (
+                                    clazz.isPrimitive() ||
+                                            (ReflectionUtils.getPrimitiveType(clazz).isPrimitive() && !isArray) ||
+                                            clazz.isEnum() ||
+                                            clazz == Class.class ||
+                                            clazz == String.class ||
+                                            clazz == AnnotationClassValue.class ||
+                                            clazz == AnnotationValue.class
+                            );
+                    if (!isValid) {
+                        throw new IllegalArgumentException("The member named [" + entry.getKey().toString() + "] with type [" + value.getClass().getName() + "] is not a valid member type");
+                    }
+                }
+            }
+            for (Map.Entry<CharSequence, Object> entry: members.entrySet()) {
+                Object value = entry.getValue();
+                if (value != null) {
+                    Class<?> clazz = value.getClass();
+                    String key = entry.getKey().toString();
+                    if (clazz == Class.class) {
+                        member(key, (Class<?>) value);
+                    } else if (clazz.isArray() && clazz.getComponentType() == Class.class) {
+                        member(key, (Class<?>[]) value);
+                    } else {
+                        values.put(key, value);
+                    }
+                }
+            }
         }
         return this;
     }
