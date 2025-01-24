@@ -30,7 +30,7 @@ import io.micronaut.core.io.buffer.ReferenceCounted;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.type.ReturnType;
-import io.micronaut.http.HttpAttributes;
+import io.micronaut.http.BasicHttpAttributes;
 import io.micronaut.http.HttpHeaders;
 import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
@@ -56,6 +56,7 @@ import io.micronaut.scheduling.instrument.InstrumentedExecutorService;
 import io.micronaut.scheduling.instrument.InstrumentedScheduledExecutorService;
 import io.micronaut.web.router.DefaultRouteInfo;
 import io.micronaut.web.router.MethodBasedRouteInfo;
+import io.micronaut.web.router.RouteAttributes;
 import io.micronaut.web.router.RouteInfo;
 import io.micronaut.web.router.RouteMatch;
 import io.micronaut.web.router.Router;
@@ -182,12 +183,12 @@ public final class RouteExecutor {
 
     static void setRouteAttributes(HttpRequest<?> request, UriRouteMatch<Object, Object> route) {
         setRouteAttributes(request, (RouteMatch<?>) route);
-        request.setAttribute(HttpAttributes.URI_TEMPLATE, route.getRouteInfo().getUriMatchTemplate().toString());
+        BasicHttpAttributes.setUriTemplate(request, route.getRouteInfo().getUriMatchTemplate().toString());
     }
 
     static void setRouteAttributes(HttpRequest<?> request, RouteMatch<?> route) {
-        request.setAttribute(HttpAttributes.ROUTE_MATCH, route);
-        request.setAttribute(HttpAttributes.ROUTE_INFO, route.getRouteInfo());
+        RouteAttributes.setRouteMatch(request, route);
+        RouteAttributes.setRouteInfo(request, route.getRouteInfo());
     }
 
     /**
@@ -202,8 +203,8 @@ public final class RouteExecutor {
                                                              Throwable cause) {
         logException(cause);
         MutableHttpResponse<?> mutableHttpResponse = HttpResponse.serverError();
-        mutableHttpResponse.setAttribute(HttpAttributes.EXCEPTION, cause);
-        mutableHttpResponse.setAttribute(HttpAttributes.ROUTE_INFO, new DefaultRouteInfo<>(
+        RouteAttributes.setException(mutableHttpResponse, cause);
+        RouteAttributes.setRouteInfo(mutableHttpResponse, new DefaultRouteInfo<>(
                 ReturnType.of(MutableHttpResponse.class, Argument.OBJECT_ARGUMENT),
                 Object.class,
                 true,
@@ -567,13 +568,15 @@ public final class RouteExecutor {
                 referenceCounted.release();
             }
             response.body(null);
-            response.attribute(HttpAttributes.HEAD_BODY, o);
+            if (o != null) {
+                RouteAttributes.setHeadBody(response, o);
+            }
         }
         applyConfiguredHeaders(response.getHeaders());
         if (routeMatch != null) {
-            response.setAttribute(HttpAttributes.ROUTE_MATCH, routeMatch);
+            RouteAttributes.setRouteMatch(response, routeMatch);
         }
-        response.setAttribute(HttpAttributes.ROUTE_INFO, routeInfo);
+        RouteAttributes.setRouteInfo(response, routeInfo);
         response.bodyWriter((MessageBodyWriter) routeInfo.getMessageBodyWriter());
         return response;
     }
