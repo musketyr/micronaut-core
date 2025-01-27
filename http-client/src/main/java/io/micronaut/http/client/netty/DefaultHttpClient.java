@@ -197,8 +197,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -887,11 +889,15 @@ public class DefaultHttpClient implements
     private <I, O, E> Mono<HttpResponse<O>> exchange(io.micronaut.http.HttpRequest<I> request, Argument<O> bodyType, Argument<E> errorType, @Nullable BlockHint blockHint) {
         setupConversionService(request);
         PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
+        // if a connection is available immediately, we can use its executor for the timeout
+        // instead of a random executor for the whole group
+        AtomicReference<ScheduledExecutorService> scheduler = new AtomicReference<>(connectionManager.getGroup());
         ExecutionFlow<HttpResponse<O>> mono = resolveRequestURI(request).flatMap(uri -> {
             MutableHttpRequest<?> mutableRequest = toMutableRequest(request).uri(uri);
             //noinspection unchecked
             return sendRequestWithRedirects(
                 propagatedContext,
+                scheduler,
                 blockHint,
                 mutableRequest,
                 (req, resp) -> InternalByteBody.bufferFlow(resp.byteBody())
@@ -909,7 +915,7 @@ public class DefaultHttpClient implements
         }
         if (requestTimeout != null) {
             if (!requestTimeout.isNegative()) {
-                mono = mono.timeout(requestTimeout, connectionManager.getGroup(), null)
+                mono = mono.timeout(requestTimeout, scheduler.get(), null)
                     .onErrorResume(throwable -> {
                         if (throwable instanceof TimeoutException) {
                             return ExecutionFlow.error(ReadTimeoutException.TIMEOUT_EXCEPTION);
@@ -1509,11 +1515,23 @@ public class DefaultHttpClient implements
         return toMono(mono, propagatedContext).doOnTerminate(requestBody::close);
     }
 
+    private ExecutionFlow<HttpResponse<?>> sendRequestWithRedirects(
+        PropagatedContext propagatedContext,
+        @Nullable BlockHint blockHint,
+        MutableHttpRequest<?> request,
+        BiFunction<MutableHttpRequest<?>, NettyClientByteBodyResponse, ? extends ExecutionFlow<? extends HttpResponse<?>>> readResponse
+    ) {
+        return sendRequestWithRedirects(propagatedContext, new AtomicReference<>(), blockHint, request, readResponse);
+    }
+
     /**
      * This is the high-level request method. It sits above {@link #sendRawRequest} and handles
      * things like filters, error handling, response parsing, request writing.
      *
      * @param propagatedContext The context propagated from the original client call
+     * @param preferredScheduler A reference holding the preferred scheduler for timeouts. This is
+     *                           replaced by the connection event loop ASAP so that callers can take
+     *                           advantage of locality
      * @param blockHint         The optional block hint
      * @param request           The request to send. Must have resolved absolute URI (see {@link #resolveURI})
      * @param readResponse      Function that reads the response from the raw
@@ -1524,6 +1542,7 @@ public class DefaultHttpClient implements
      */
     private ExecutionFlow<HttpResponse<?>> sendRequestWithRedirects(
         PropagatedContext propagatedContext,
+        AtomicReference<ScheduledExecutorService> preferredScheduler,
         @Nullable BlockHint blockHint,
         MutableHttpRequest<?> request,
         BiFunction<MutableHttpRequest<?>, NettyClientByteBodyResponse, ? extends ExecutionFlow<? extends HttpResponse<?>>> readResponse
@@ -1544,6 +1563,7 @@ public class DefaultHttpClient implements
                     try (PropagatedContext.Scope ignore = propagatedContext.propagate()) {
                         return sendRequestWithRedirectsNoFilter(
                             propagatedContext,
+                            preferredScheduler,
                             blockHint,
                             MutableHttpRequestWrapper.wrapIfNecessary(conversionService, request),
                             readResponse
@@ -1559,6 +1579,7 @@ public class DefaultHttpClient implements
 
     private ExecutionFlow<HttpResponse<?>> sendRequestWithRedirectsNoFilter(
         PropagatedContext propagatedContext,
+        AtomicReference<ScheduledExecutorService> preferredScheduler,
         @Nullable BlockHint blockHint,
         MutableHttpRequest<?> request,
         BiFunction<MutableHttpRequest<?>, NettyClientByteBodyResponse, ? extends ExecutionFlow<? extends HttpResponse<?>>> readResponse
@@ -1577,6 +1598,8 @@ public class DefaultHttpClient implements
         // first: connect
         return connectionManager.connect(requestKey, blockHint)
             .flatMap(poolHandle -> {
+                preferredScheduler.set(poolHandle.channel.eventLoop());
+
                 // build the raw request
                 request.setAttribute(NettyClientHttpRequest.CHANNEL, poolHandle.channel);
 
