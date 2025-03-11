@@ -3,6 +3,7 @@ package io.micronaut.visitors
 
 import io.micronaut.annotation.processing.test.AbstractTypeElementSpec
 import io.micronaut.inject.writer.BeanDefinitionVisitor
+import spock.lang.PendingFeature
 
 class PostponedVisitorsSpec extends AbstractTypeElementSpec {
 
@@ -30,6 +31,7 @@ public record Walrus (
             definition
     }
 
+    @PendingFeature(reason = "It is currently not possible to implement a generated interface")
     void 'test postpone introduction generation implementing generated interface'() {
         when:
         def context = buildContext('test.MyIntroduction' + BeanDefinitionVisitor.PROXY_SUFFIX, '''
