@@ -52,6 +52,15 @@ import java.util.stream.IntStream
 
 class BeanIntrospectionSpec extends AbstractTypeElementSpec {
 
+    void "test reflective access to package private constructor"() {
+        when:
+        def introspection = BeanIntrospector.SHARED.getIntrospection(PackagePrivateConstructor)
+
+        then:
+        introspection != null
+        introspection.instantiate() instanceof PackagePrivateConstructor
+    }
+
     void "test inner introspection"() {
         when:
         def introspection = buildBeanIntrospection('test.Test$Foo', '''
