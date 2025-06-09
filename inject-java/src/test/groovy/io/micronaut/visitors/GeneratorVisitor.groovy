@@ -17,8 +17,23 @@ import io.micronaut.http.annotation.Get;
 @Introspected
 public interface Parent {
 
+    String BASE_PATH = "/hello";
+
     @Get("/get")
-    String hello();
+    TestModel hello();
+
+}
+"""
+
+    private static final @Language("java") String SOURCE_MODEL = """
+package example;
+
+import io.micronaut.core.annotation.Introspected;
+
+@Introspected
+public record TestModel(
+        String greeting
+) {
 
 }
 """
@@ -30,6 +45,15 @@ public interface Parent {
                     .ifPresent(generatedFile -> {
                         try {
                             generatedFile.write(writer -> writer.write(SOURCE))
+                        } catch (IOException e) {
+                            throw new RuntimeException(e)
+                        }
+                    })
+
+            context.visitGeneratedSourceFile("example", "TestModel", element)
+                    .ifPresent(generatedFile -> {
+                        try {
+                            generatedFile.write(writer -> writer.write(SOURCE_MODEL))
                         } catch (IOException e) {
                             throw new RuntimeException(e)
                         }
