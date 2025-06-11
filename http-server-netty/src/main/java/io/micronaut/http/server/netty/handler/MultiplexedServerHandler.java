@@ -238,8 +238,8 @@ abstract class MultiplexedServerHandler {
         @Override
         public void write(@NonNull HttpResponse response, @NonNull ByteBody body) {
             if (responseDone) {
-                // early check
-                throw new IllegalStateException("Response already written");
+                // stream reset
+                return;
             }
 
             // we do some preparation immediately on the calling thread, so that the ByteBody
@@ -350,8 +350,9 @@ abstract class MultiplexedServerHandler {
 
         private void writeFull(@NonNull HttpResponse response, @NonNull ByteBuf content) {
             if (responseDone) {
-                // early check
-                throw new IllegalStateException("Response already written");
+                // stream closed
+                content.release();
+                return;
             }
             if (!ctx.executor().inEventLoop()) {
                 ByteBuf finalContent = content;
