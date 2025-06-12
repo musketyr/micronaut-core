@@ -16,6 +16,7 @@ tasks {
         systemProperty("io.netty.leakDetection.level", "paranoid")
         systemProperty("io.netty.customResourceLeakDetector", "io.micronaut.http.server.netty.fuzzing.BufferLeakDetection")
         systemProperty("io.netty.leakDetection.targetRecords", "100")
+        jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
         maxHeapSize = "1G"
     }
 }
