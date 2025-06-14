@@ -77,10 +77,10 @@ managed-jackson = "2.18.3"
 #@NextMajorVersion @Deprecated Delete in Micronaut Framework 5.
 managed-jackson-databind = "2.18.2"
 managed-kotlin = "1.9.25"
+managed-kotlin2 = "2.1.21"
 managed-kotlin-coroutines = "1.8.1"
 managed-methvin-directory-watcher = "0.19.0"
 managed-netty = "4.2.2.Final"
-managed-netty-http3 = "0.0.29.Final"
 managed-netty-tcnative = "2.0.72.Final"
 managed-reactive-streams = "1.0.4"
 # This should be kept aligned with https://github.com/micronaut-projects/micronaut-reactor/blob/master/gradle.properties from the BOM
@@ -88,6 +88,7 @@ managed-reactor = "3.7.7"
 managed-snakeyaml = "2.4"
 managed-java-parser-core = "3.26.4"
 managed-ksp = "1.9.25-1.0.20"
+managed-ksp2 = "2.1.21-2.0.2"
 sonatype-scan = "3.0.0"
 micronaut-docs = "2.0.0"
 
@@ -147,14 +148,17 @@ managed-kotlinx-coroutines-reactor = { module = "org.jetbrains.kotlinx:kotlinx-c
 
 managed-ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "managed-ksp" }
 managed-ksp = { module = "com.google.devtools.ksp:symbol-processing", version.ref = "managed-ksp" }
+
 managed-java-parser-core = { module = "com.github.javaparser:javaparser-symbol-solver-core", version.ref = "managed-java-parser-core" }
 managed-methvin-directoryWatcher = { module = "io.methvin:directory-watcher", version.ref = "managed-methvin-directory-watcher" }
 
 managed-netty-buffer = { module = "io.netty:netty-buffer", version.ref = "managed-netty" }
 managed-netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "managed-netty" }
 managed-netty-codec-http2 = { module = "io.netty:netty-codec-http2", version.ref = "managed-netty" }
+managed-netty-codec-http3 = { module = "io.netty:netty-codec-http3", version.ref = "managed-netty" }
+managed-netty-codec-classes-quic = { module = "io.netty:netty-codec-classes-quic", version.ref = "managed-netty" }
+managed-netty-codec-native-quic = { module = "io.netty:netty-codec-native-quic", version.ref = "managed-netty" }
 managed-netty-common = { module = "io.netty:netty-common", version.ref = "managed-netty" }
-managed-netty-incubator-codec-http3 = { module = "io.netty.incubator:netty-incubator-codec-http3", version.ref = "managed-netty-http3" }
 managed-netty-handler = { module = "io.netty:netty-handler", version.ref = "managed-netty" }
 managed-netty-handler-proxy = { module = "io.netty:netty-handler-proxy", version.ref = "managed-netty" }
 managed-netty-transport-native-epoll = { module = "io.netty:netty-transport-native-epoll", version.ref = "managed-netty" }
@@ -304,7 +308,22 @@ mimepull = { module = "org.jvnet.mimepull:mimepull", version.ref = "mimepull" }
 
 wiremock = { module = "com.github.tomakehurst:wiremock-jre8", version.ref = "wiremock" }
 
+ksp2-commonDeps = { module = "com.google.devtools.ksp:symbol-processing-common-deps", version.ref = "managed-ksp2" }
+ksp2-aaEmbeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "managed-ksp2" }
+
 jfrunit-core = { module = "org.moditect.jfrunit:jfrunit-core", version.ref = "jfrunit" }
+
+# Kotlin 2 KSP 2 for testing
+
+kotlin2-annotation-processing-embeddable = { module = "org.jetbrains.kotlin:kotlin-annotation-processing-embeddable", version.ref = "managed-kotlin2" }
+kotlin2-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "managed-kotlin2" }
+kotlin2-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "managed-kotlin2" }
+kotlin2-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "managed-kotlin2" }
+kotlin2-stdlib-jdk8 = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "managed-kotlin2" }
+kotlin2-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "managed-kotlin2" }
+
+ksp2-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "managed-ksp2" }
+ksp2 = { module = "com.google.devtools.ksp:symbol-processing", version.ref = "managed-ksp2" }
 
 [plugins]
 managed-kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "managed-kotlin" }
@@ -312,3 +331,6 @@ managed-kotlin-noarg = { id = "org.jetbrains.kotlin.plugin.noarg", version.ref =
 managed-kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "managed-kotlin" }
 managed-kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "managed-kotlin" }
 managed-ksp = { id = "com.google.devtools.ksp", version.ref = "managed-ksp" }
+
+kotlin2-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "managed-kotlin2" }
+ksp2 = { id = "com.google.devtools.ksp", version.ref = "managed-ksp2" }
