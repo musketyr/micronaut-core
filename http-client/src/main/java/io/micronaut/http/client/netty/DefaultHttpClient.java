@@ -1414,6 +1414,12 @@ public class DefaultHttpClient implements
         );
     }
 
+    private void completeExceptionallySafe(DelayedExecutionFlow<?> flow, Throwable exc) {
+        if (!flow.tryCompleteExceptionally(exc)) {
+            log.debug("Client exception suppressed because response flow already completed", exc);
+        }
+    }
+
     private ExecutionFlow<HttpResponse<?>> readBodyOnError(@Nullable Argument<?> errorType, @NonNull ExecutionFlow<HttpResponse<?>> publisher) {
         if (errorType != null && errorType != HttpClient.DEFAULT_ERROR_TYPE) {
             return publisher.onErrorResume(clientException -> {
@@ -1440,7 +1446,7 @@ public class DefaultHttpClient implements
                             @Override
                             public void onError(Throwable t) {
                                 buffer.release();
-                                delayed.completeExceptionally(t);
+                                completeExceptionallySafe(delayed, t);
                             }
 
                             @Override
@@ -1448,7 +1454,7 @@ public class DefaultHttpClient implements
                                 try {
                                     FullHttpResponse fullHttpResponse = new DefaultFullHttpResponse(nettyResponse.protocolVersion(), nettyResponse.status(), buffer, nettyResponse.headers(), new DefaultHttpHeaders(true));
                                     final FullNettyClientHttpResponse<Object> fullNettyClientHttpResponse = new FullNettyClientHttpResponse<>(fullHttpResponse, handlerRegistry, (Argument<Object>) errorType, true, conversionService);
-                                    delayed.completeExceptionally(decorate(new HttpClientResponseException(
+                                    completeExceptionallySafe(delayed, decorate(new HttpClientResponseException(
                                         fullHttpResponse.status().reasonPhrase(),
                                         null,
                                         fullNettyClientHttpResponse,
@@ -1724,7 +1730,7 @@ public class DefaultHttpClient implements
         } else {
             streamWriter = new StreamWriter((StreamingNettyByteBody) byteBody, e -> {
                 poolHandle.taint();
-                sink.completeExceptionally(e);
+                completeExceptionallySafe(sink, e);
             });
             pipeline.addLast(streamWriter);
             byteBuf = null;
@@ -1743,7 +1749,7 @@ public class DefaultHttpClient implements
             @Override
             public void fail(ChannelHandlerContext ctx, Throwable cause) {
                 poolHandle.taint();
-                sink.completeExceptionally(handleResponseError(request, cause));
+                completeExceptionallySafe(sink, handleResponseError(request, cause));
             }
 
             @Override

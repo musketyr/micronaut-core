@@ -64,6 +64,7 @@ dependencies {
     testImplementation(projects.micronautHttpNettyHttp3)
     testImplementation(libs.bcpkix)
     testImplementation(projects.micronautJacksonDatabind)
+    testImplementation(projects.micronautHttpTck)
 // Add Micronaut Jackson XML after v4 Migration
 //    testImplementation(libs.managed.micronaut.xml) {
 //        exclude module:'micronaut-inject'
