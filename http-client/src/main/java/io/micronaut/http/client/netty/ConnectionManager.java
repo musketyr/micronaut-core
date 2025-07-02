@@ -1182,6 +1182,12 @@ public class ConnectionManager {
          * Notify any {@link NettyClientCustomizer} that the request pipeline has been built.
          */
         public abstract void notifyRequestPipelineBuilt();
+
+        public final void touch() {
+            if (tracker != null) {
+                tracker.record();
+            }
+        }
     }
 
     /**
@@ -1697,6 +1703,7 @@ public class ConnectionManager {
                             @Override
                             public void taint() {
                                 // do nothing, we don't reuse stream channels
+                                touch();
                             }
 
                             @Override
