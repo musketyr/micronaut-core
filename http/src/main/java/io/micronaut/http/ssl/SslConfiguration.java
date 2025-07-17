@@ -17,6 +17,7 @@ package io.micronaut.http.ssl;
 
 import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.core.util.Toggleable;
 import org.slf4j.Logger;
@@ -371,12 +372,18 @@ public class SslConfiguration implements Toggleable {
     public static class KeyStoreConfiguration {
         public static final String PREFIX = "key-store";
         private String path;
+        private String keyPath;
+        private String certificatePath;
         private String password;
         private String type;
         private String provider;
 
         /**
-         * @return The path to the key store (typically .jks). Can use classpath: and file:.
+         * The path to the key store (typically .jks). Can also point to a PEM file containing
+         * a private key followed by the X.509 trust chain. Can use {@code classpath:},
+         * {@code file:}, {@code string:} or {@code base64:}.
+         *
+         * @return The resource containing the key store
          */
         public Optional<String> getPath() {
             return Optional.ofNullable(path);
@@ -404,9 +411,11 @@ public class SslConfiguration implements Toggleable {
         }
 
         /**
-         * Sets the path.
+         * The path to the key store (typically .jks). Can also point to a PEM file containing
+         * a private key followed by the X.509 trust chain. Can use {@code classpath:},
+         * {@code file:}, {@code string:} or {@code base64:}.
          *
-         * @param path The path
+         * @param path The resource containing the key store
          */
         public void setPath(String path) {
             this.path = path;
@@ -438,6 +447,56 @@ public class SslConfiguration implements Toggleable {
         public void setProvider(String provider) {
             this.provider = provider;
         }
+
+        /**
+         * A path to a PEM file containing the private key of the server. Can use
+         * {@code classpath:}, {@code file:}, {@code string:} or {@code base64:}. Cannot be set at
+         * the same time as the {@code path} property.
+         *
+         * @return The key path
+         * @since 4.10.0
+         */
+        @Nullable
+        public String getKeyPath() {
+            return keyPath;
+        }
+
+        /**
+         * A path to a PEM file containing the private key. Can use
+         * {@code classpath:}, {@code file:}, {@code string:} or {@code base64:}. Cannot be set at
+         * the same time as the {@code path} property.
+         *
+         * @param keyPath The key path
+         * @since 4.10.0
+         */
+        public void setKeyPath(@Nullable String keyPath) {
+            this.keyPath = keyPath;
+        }
+
+        /**
+         * A path to a PEM file containing the certificate chain. Can use
+         * {@code classpath:}, {@code file:}, {@code string:} or {@code base64:}. Cannot be set at
+         * the same time as the {@code path} property.
+         *
+         * @return The certificate chain path
+         * @since 4.10.0
+         */
+        @Nullable
+        public String getCertificatePath() {
+            return certificatePath;
+        }
+
+        /**
+         * A path to a PEM file containing the certificate chain. Can use
+         * {@code classpath:}, {@code file:}, {@code string:} or {@code base64:}. Cannot be set at
+         * the same time as the {@code path} property.
+         *
+         * @param certificatePath The certificate chain path
+         * @since 4.10.0
+         */
+        public void setCertificatePath(@Nullable String certificatePath) {
+            this.certificatePath = certificatePath;
+        }
     }
 
     /**
@@ -451,7 +510,11 @@ public class SslConfiguration implements Toggleable {
         private String provider;
 
         /**
-         * @return The path to the trust store (typically .jks). Can use classpath: and file:.
+         * The path to the trust store (typically .jks). Can also point to a PEM file containing
+         * one or more X.509 certificates. Can use {@code classpath:}, {@code file:},
+         * {@code string:} or {@code base64:}.
+         *
+         * @return The resource containing the trust store
          */
         public Optional<String> getPath() {
             return Optional.ofNullable(path);
@@ -479,9 +542,11 @@ public class SslConfiguration implements Toggleable {
         }
 
         /**
-         * Sets the path.
+         * The path to the trust store (typically .jks). Can also point to a PEM file containing
+         * one or more X.509 certificates. Can use {@code classpath:}, {@code file:},
+         * {@code string:} or {@code base64:}.
          *
-         * @param path The path
+         * @param path The resource containing the trust store
          */
         public void setPath(String path) {
             this.path = path;
