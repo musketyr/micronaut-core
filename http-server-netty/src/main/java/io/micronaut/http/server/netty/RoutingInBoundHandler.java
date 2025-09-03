@@ -31,7 +31,7 @@ import io.micronaut.http.context.ServerHttpRequestContext;
 import io.micronaut.http.context.event.HttpRequestReceivedEvent;
 import io.micronaut.http.context.event.HttpRequestTerminatedEvent;
 import io.micronaut.http.netty.NettyMutableHttpResponse;
-import io.micronaut.http.netty.body.AvailableNettyByteBody;
+import io.micronaut.http.netty.body.NettyByteBodyFactory;
 import io.micronaut.http.netty.channel.ChannelPipelineCustomizer;
 import io.micronaut.http.server.RouteExecutor;
 import io.micronaut.http.server.binding.RequestArgumentSatisfier;
@@ -177,7 +177,7 @@ public final class RoutingInBoundHandler implements RequestHandler {
             // invalid URI
             NettyHttpRequest<Object> errorRequest = new NettyHttpRequest<>(
                 new DefaultHttpRequest(request.protocolVersion(), request.method(), "/"),
-                AvailableNettyByteBody.empty(),
+                    NettyByteBodyFactory.empty(),
                 ctx,
                 conversionService,
                 serverConfiguration
@@ -219,7 +219,7 @@ public final class RoutingInBoundHandler implements RequestHandler {
                 ByteBodyHttpResponse<?> encodedResponse;
                 if (t != null) {
                     // fallback of the fallback...
-                    encodedResponse = ByteBodyHttpResponseWrapper.wrap(HttpResponse.serverError(), AvailableNettyByteBody.empty());
+                    encodedResponse = ByteBodyHttpResponseWrapper.wrap(HttpResponse.serverError(), NettyByteBodyFactory.empty());
                     try {
                         outboundAccess.closeAfterWrite();
                     } catch (Throwable g) {
@@ -261,7 +261,7 @@ public final class RoutingInBoundHandler implements RequestHandler {
             // this happens when the connection is already closed, but let's write a fake response
             // anyway to ensure the request is closed
             outboundAccess.closeAfterWrite();
-            outboundAccess.write(new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.SERVICE_UNAVAILABLE), AvailableNettyByteBody.empty());
+            outboundAccess.write(new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.SERVICE_UNAVAILABLE), NettyByteBodyFactory.empty());
         }
     }
 
