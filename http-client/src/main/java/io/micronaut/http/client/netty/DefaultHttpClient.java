@@ -1621,6 +1621,7 @@ public class DefaultHttpClient implements
         // first: connect
         return connectionManager.connect(requestKey, blockHint, preferredScheduler)
             .flatMap(poolHandle -> {
+                poolHandle.touch();
                 preferredScheduler.set(poolHandle.channel.eventLoop());
 
                 // build the raw request
@@ -1691,6 +1692,7 @@ public class DefaultHttpClient implements
         io.micronaut.http.HttpRequest<?> request,
         CloseableByteBody byteBody
     ) {
+        poolHandle.touch();
         URI uri = request.getUri();
         String uriWithoutHost = uri.getRawPath();
         if (uri.getRawQuery() != null) {

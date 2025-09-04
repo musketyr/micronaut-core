@@ -252,7 +252,9 @@ abstract class MultiplexedServerHandler {
 
         @Override
         public void write(@NonNull HttpResponse response, @NonNull ByteBody body) {
+            body.touch();
             if (responseDone) {
+                body.touch();
                 // stream reset
                 return;
             }
@@ -271,6 +273,7 @@ abstract class MultiplexedServerHandler {
             }
 
             NettyByteBodyFactory byteBodyFactory = byteBodyFactory();
+            nbb.touch();
             if (body instanceof AvailableByteBody available) {
                 writeFull(response, NettyByteBodyFactory.toByteBuf(available));
             } else {

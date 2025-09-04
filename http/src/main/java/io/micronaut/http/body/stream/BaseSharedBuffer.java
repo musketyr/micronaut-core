@@ -96,6 +96,8 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
      */
     private List<ReadBuffer> buffer;
 
+    private BufferLengthExceededException bufferLimitsExceeded = null;
+
     public BaseSharedBuffer(ReadBufferFactory readBufferFactory, BodySizeLimits limits, BufferConsumer.Upstream rootUpstream) {
         this.readBufferFactory = readBufferFactory;
         this.limits = limits;
@@ -243,8 +245,8 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
             forwardInitialBuffer(subscriber, last);
             if (error != null) {
                 subscriber.error(error);
-            } else if (lengthSoFar > limits.maxBufferSize()) {
-                subscriber.error(new BufferLengthExceededException(limits.maxBufferSize(), lengthSoFar));
+            } else if (bufferLimitsExceeded != null) {
+                subscriber.error(bufferLimitsExceeded);
                 specificUpstream.allowDiscard();
             }
             if (complete) {
@@ -292,6 +294,12 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
                 ret = ExecutionFlow.error(error);
             } else {
                 targetFlow.completeExceptionally(error);
+            }
+        } else if (bufferLimitsExceeded != null) {
+            if (canReturnImmediate) {
+                ret = ExecutionFlow.error(bufferLimitsExceeded);
+            } else {
+                targetFlow.completeExceptionally(bufferLimitsExceeded);
             }
         } else if (complete) {
             ReadBuffer buf = getBufferedData(last);
@@ -359,14 +367,17 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
                 }
             }
             if (reserved > 0 || fullSubscribers != null) {
-                if (newLength > limits.maxBufferSize()) {
+                if (newLength > limits.maxBufferSize()|| bufferLimitsExceeded != null) {
                     // new subscribers will recognize that the limit has been exceeded. Streaming
                     // subscribers can proceed normally. Need to notify buffering subscribers
                     discardBuffer();
+                    if (bufferLimitsExceeded == null) {
+                        bufferLimitsExceeded = new BufferLengthExceededException(limits.maxBufferSize(), lengthSoFar);
                     if (fullSubscribers != null) {
-                        Exception e = new BufferLengthExceededException(limits.maxBufferSize(), lengthSoFar);
                         for (DelayedExecutionFlow<?> fullSubscriber : fullSubscribers) {
-                            fullSubscriber.completeExceptionally(e);
+                            fullSubscriber.completeExceptionally(bufferLimitsExceeded);
+                        }
+                        fullSubscribers = null;
                         }
                     }
                 } else {
@@ -395,12 +406,13 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
                 subscriber.complete();
             }
         }
-        if (fullSubscribers != null) {
+        if (fullSubscribers != null && bufferLimitsExceeded == null) {
             boolean last = reserved <= 0;
             for (Iterator<DelayedExecutionFlow<ReadBuffer>> iterator = fullSubscribers.iterator(); iterator.hasNext(); ) {
                 DelayedExecutionFlow<ReadBuffer> fullSubscriber = iterator.next();
                 fullSubscriber.complete(getBufferedData(last && !iterator.hasNext()));
             }
+            fullSubscribers = null;
         }
     }
 
@@ -423,10 +435,11 @@ public abstract class BaseSharedBuffer implements BufferConsumer {
                 subscriber.error(e);
             }
         }
-        if (fullSubscribers != null) {
+        if (fullSubscribers != null && bufferLimitsExceeded == null) {
             for (DelayedExecutionFlow<?> fullSubscriber : fullSubscribers) {
                 fullSubscriber.completeExceptionally(e);
             }
+            fullSubscribers = null;
         }
     }
 
