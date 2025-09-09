@@ -77,7 +77,7 @@ public final class ConfigurationReaderVisitor implements TypeElementVisitor<Conf
     @NonNull
     @Override
     public VisitorKind getVisitorKind() {
-        return VisitorKind.ISOLATING;
+        return VisitorKind.AGGREGATING;
     }
 
     @Override
