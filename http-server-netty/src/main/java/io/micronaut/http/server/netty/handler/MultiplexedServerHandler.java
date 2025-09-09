@@ -252,7 +252,9 @@ abstract class MultiplexedServerHandler {
 
         @Override
         public void write(@NonNull HttpResponse response, @NonNull ByteBody body) {
+            body.touch();
             if (responseDone) {
+                body.touch();
                 // stream reset
                 return;
             }
@@ -497,7 +499,7 @@ abstract class MultiplexedServerHandler {
         private class InputStreamer implements BufferConsumer.Upstream, BufferConsumer {
             final StreamingNettyByteBody.SharedBuffer dest = byteBodyFactory().createStreamingBuffer(bodySizeLimits, this);
             /**
-             * Number of bytes that have been received by {@link #add(ByteBuf)} but the downstream
+             * Number of bytes that have been received by {@link #add(ReadBuffer)} but the downstream
              * hasn't consumed ({@link #onBytesConsumed(long)}). May be negative if the downstream
              * has signaled more consumption.
              */

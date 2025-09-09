@@ -39,8 +39,8 @@ public class FuzzyInputTest {
                 Content-Length: 7
                 Transfer-Encoding: chunked
 
-                """));
-            channel.writeInbound(ByteBufUtil.writeUtf8(channel.alloc(), "\n"));
+                """.replace("\n", "\r\n")));
+            channel.writeInbound(ByteBufUtil.writeUtf8(channel.alloc(), "\r\n"));
 
             channel.finishAndReleaseAll();
             channel.checkException();
@@ -57,7 +57,7 @@ public class FuzzyInputTest {
                 Transfer-Encoding: chunked
 
                 C
-                O:"""));
+                O:""".replace("\n", "\r\n")));
             channel.writeInbound(ByteBufUtil.writeUtf8(channel.alloc(), "aaaaaa"));
 
             channel.finishAndReleaseAll();

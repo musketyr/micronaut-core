@@ -173,4 +173,12 @@ public final class AvailableNettyByteBody extends InternalByteBody implements Cl
         }
         return new AvailableNettyByteBody(b.retainedSlice());
     }
+
+    @Override
+    public void touch() {
+        ByteBuf b = buffer;
+        if (b != null) {
+            b.touch();
+        }
+    }
 }
