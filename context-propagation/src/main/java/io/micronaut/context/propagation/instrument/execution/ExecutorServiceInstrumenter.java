@@ -21,7 +21,6 @@ import io.micronaut.context.event.BeanCreatedEventListener;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.scheduling.instrument.InstrumentedExecutorService;
-import io.micronaut.scheduling.instrument.InstrumentedScheduledExecutorService;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -45,47 +44,17 @@ final class ExecutorServiceInstrumenter implements BeanCreatedEventListener<Exec
      */
     @Override
     public ExecutorService onCreated(BeanCreatedEvent<ExecutorService> event) {
-        Class<ExecutorService> beanType = event.getBeanDefinition().getBeanType();
-        if (beanType == ExecutorService.class) {
-            ExecutorService executorService = event.getBean();
-            if (executorService instanceof ScheduledExecutorService service) {
-                return new InstrumentedScheduledExecutorService() {
-                    @Override
-                    public ScheduledExecutorService getTarget() {
-                        return service;
-                    }
-
-                    @Override
-                    public <T> Callable<T> instrument(Callable<T> task) {
-                        return PropagatedContext.wrapCurrent(task);
-                    }
-
-                    @Override
-                    public Runnable instrument(Runnable command) {
-                        return PropagatedContext.wrapCurrent(command);
-                    }
-                };
-            } else {
-                return new InstrumentedExecutorService() {
-                    @Override
-                    public ExecutorService getTarget() {
-                        return executorService;
-                    }
-
-                    @Override
-                    public <T> Callable<T> instrument(Callable<T> task) {
-                        return PropagatedContext.wrapCurrent(task);
-                    }
-
-                    @Override
-                    public Runnable instrument(Runnable command) {
-                        return PropagatedContext.wrapCurrent(command);
-                    }
-                };
-            }
-        } else {
+        Class<? extends ExecutorService> beanType = event.getBeanDefinition().getBeanType();
+        if (beanType != ExecutorService.class) {
             return event.getBean();
         }
+        ExecutorService executorService = event.getBean();
+        if (ContextPropagatingExecutorService.isInstrumented(executorService)) {
+            return executorService;
+        }
+        if (executorService instanceof ScheduledExecutorService service) {
+            return new ContextPropagatingScheduledExecutorService(service);
+        }
+        return new ContextPropagatingExecutorService(executorService);
     }
-
 }

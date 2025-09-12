@@ -17,6 +17,7 @@ package io.micronaut.http.server.netty.configuration;
 
 import io.micronaut.context.annotation.ConfigurationProperties;
 import io.micronaut.context.annotation.EachProperty;
+import io.micronaut.context.annotation.Parameter;
 import io.micronaut.context.annotation.Property;
 import io.micronaut.context.annotation.Replaces;
 import io.micronaut.context.annotation.Requires;
@@ -110,6 +111,12 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
     public static final int DEFAULT_COMPRESSIONLEVEL = 6;
 
     /**
+     * The default size of the largest data that can be encoded using the zstd algorithm.
+     */
+    @SuppressWarnings("WeakerAccess")
+    public static final int DEFAULT_MAX_ZSTD_ENCODE_SIZE = 1024 * 1024 * 32;
+
+    /**
      * The default configuration for boolean flag indicating whether to add connection header `keep-alive` to responses with HttpStatus > 499.
      */
     @SuppressWarnings("WeakerAccess")
@@ -200,6 +207,7 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
     private LogLevel logLevel;
     private int compressionThreshold = DEFAULT_COMPRESSIONTHRESHOLD;
     private int compressionLevel = DEFAULT_COMPRESSIONLEVEL;
+    private int maxZstdEncodeSize = DEFAULT_MAX_ZSTD_ENCODE_SIZE;
     private boolean useNativeTransport = DEFAULT_USE_NATIVE_TRANSPORT;
     private String fallbackProtocol = ApplicationProtocolNames.HTTP_1_1;
     private AccessLogger accessLogger;
@@ -473,6 +481,16 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
     }
 
     /**
+     * The default maximum size of data that can be encoded using the zstd algorithm.
+     * Default value ({@value #DEFAULT_MAX_ZSTD_ENCODE_SIZE}).
+     *
+     * @return The maximum size of data that can be encoded using the zstd algorithm.
+     */
+    public int getMaxZstdEncodeSize() {
+        return maxZstdEncodeSize;
+    }
+
+    /**
      * @return The Netty child channel options.
      * @see io.netty.bootstrap.ServerBootstrap#childOption(io.netty.channel.ChannelOption, Object)
      */
@@ -655,6 +673,15 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
      */
     public void setCompressionLevel(@ReadableBytes int compressionLevel) {
         this.compressionLevel = compressionLevel;
+    }
+
+    /**
+     * Sets the maximum size of data that can be encoded using the zstd algorithm. Default value ({@value #DEFAULT_MAX_ZSTD_ENCODE_SIZE}).
+     *
+     * @param maxZstdEncodeSize The maximum size of block.
+     */
+    public void setMaxZstdEncodeSize(int maxZstdEncodeSize) {
+        this.maxZstdEncodeSize = maxZstdEncodeSize;
     }
 
     /**
@@ -1170,7 +1197,9 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
      * @author James Kleeh
      * @author graemerocher
      * @since 3.1.0
+     * @deprecated Replaced by {@link HttpServerConfiguration.FileTypeHandlerConfiguration}
      */
+    @Deprecated(since = "4.8.0", forRemoval = true)
     @ConfigurationProperties("responses.file")
     public static class FileTypeHandlerConfiguration {
 
@@ -1199,14 +1228,6 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
         @Inject
         public FileTypeHandlerConfiguration(@Nullable @Property(name = "netty.responses.file.cache-seconds") Integer cacheSeconds,
                                             @Nullable @Property(name = "netty.responses.file.cache-control.public") Boolean isPublic) {
-            if (cacheSeconds != null) {
-                this.cacheSeconds = cacheSeconds;
-                LOG.warn("The configuration `netty.responses.file.cache-seconds` is deprecated and will be removed in a future release. Use `micronaut.server.netty.responses.file.cache-seconds` instead.");
-            }
-            if (isPublic != null) {
-                this.cacheControl.setPublic(isPublic);
-                LOG.warn("The configuration `netty.responses.file.cache-control.public` is deprecated and will be removed in a future release. Use `micronaut.server.netty.responses.file.cache-control.public` instead.");
-            }
         }
 
         /**
@@ -1242,7 +1263,10 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
 
         /**
          * Configuration for the Cache-Control header.
+         *
+         * @deprecated Replaced by {@link HttpServerConfiguration.FileTypeHandlerConfiguration.CacheControlConfiguration}
          */
+        @Deprecated(since = "4.8.0", forRemoval = true)
         @ConfigurationProperties("cache-control")
         public static class CacheControlConfiguration {
 
@@ -1274,12 +1298,14 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
      */
     public abstract static class EventLoopConfig implements EventLoopGroupConfiguration {
         private int threads;
+        private double threadCoreRatio = DEFAULT_THREAD_CORE_RATIO;
         private Integer ioRatio;
         private String executor;
         private boolean preferNativeTransport = false;
         private Duration shutdownQuietPeriod = Duration.ofSeconds(DEFAULT_SHUTDOWN_QUIET_PERIOD);
         private Duration shutdownTimeout = Duration.ofSeconds(DEFAULT_SHUTDOWN_TIMEOUT);
         private String name;
+        private boolean loomCarrier = false;
 
         /**
          * @param name The name;
@@ -1393,6 +1419,21 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
         }
 
         @Override
+        public double getThreadCoreRatio() {
+            return threadCoreRatio;
+        }
+
+        /**
+         * The number of threads per core to use if {@link #getNumThreads()} is set to 0.
+         *
+         * @param threadCoreRatio The thread-to-core ratio
+         * @since 4.8.0
+         */
+        public void setThreadCoreRatio(double threadCoreRatio) {
+            this.threadCoreRatio = threadCoreRatio;
+        }
+
+        @Override
         public boolean isPreferNativeTransport() {
             return preferNativeTransport;
         }
@@ -1406,6 +1447,20 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
         public Duration getShutdownTimeout() {
             return shutdownTimeout;
         }
+
+        @Override
+        public boolean isLoomCarrier() {
+            return loomCarrier;
+        }
+
+        /**
+         * @param loomCarrier When set to {@code true}, use a special <i>experimental</i> event
+         *                    loop that can also execute virtual threads, in order to improve
+         *                    virtual thread performance.
+         */
+        public void setLoomCarrier(boolean loomCarrier) {
+            this.loomCarrier = loomCarrier;
+        }
     }
 
     /**
@@ -1416,6 +1471,7 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
      */
     @EachProperty("listeners")
     public static final class NettyListenerConfiguration {
+        private final String name;
         private Family family = Family.TCP;
         private boolean ssl;
         @Nullable
@@ -1423,10 +1479,31 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
         private int port;
         private String path;
         private boolean exposeDefaultRoutes = true;
+        private boolean supportGracefulShutdown = true;
         private Integer fd = null;
         private Integer acceptedFd = null;
         private boolean bind = true;
         private boolean serverSocket = true;
+
+        /**
+         * Constructor.
+         *
+         * @param name The name of this listener
+         */
+        @Inject
+        public NettyListenerConfiguration(@Parameter String name) {
+            this.name = name;
+        }
+
+        /**
+         * Constructor.
+         *
+         * @deprecated Please pass the listener name to {@link #NettyListenerConfiguration(String)}
+         */
+        @Deprecated
+        public NettyListenerConfiguration() {
+            this("unknown");
+        }
 
         /**
          * Create a TCP listener configuration.
@@ -1438,12 +1515,21 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
          */
         @Internal
         public static NettyListenerConfiguration createTcp(@Nullable String host, int port, boolean ssl) {
-            NettyListenerConfiguration configuration = new NettyListenerConfiguration();
+            NettyListenerConfiguration configuration = new NettyListenerConfiguration(host + ":" + port);
             configuration.setFamily(Family.TCP);
             configuration.setHost(host);
             configuration.setPort(port);
             configuration.setSsl(ssl);
             return configuration;
+        }
+
+        /**
+         * Name of the listener.
+         *
+         * @return Name of the listener
+         */
+        public String getName() {
+            return name;
         }
 
         /**
@@ -1546,6 +1632,30 @@ public class NettyHttpServerConfiguration extends HttpServerConfiguration {
         @Internal
         public void setExposeDefaultRoutes(boolean exposeDefaultRoutes) {
             this.exposeDefaultRoutes = exposeDefaultRoutes;
+        }
+
+        /**
+         * If {@code true} (the default), this listener will stop accepting new connections and
+         * terminate any existing ones when a graceful shutdown is initiated. By setting this to
+         * {@code false} you can ignore the graceful shutdown, e.g. to keep a management port up
+         * while the shutdown of other listeners is in progress.
+         *
+         * @return Whether to support shutting down gracefully
+         */
+        public boolean isSupportGracefulShutdown() {
+            return supportGracefulShutdown;
+        }
+
+        /**
+         * If {@code true} (the default), this listener will stop accepting new connections and
+         * terminate any existing ones when a graceful shutdown is initiated. By setting this to
+         * {@code false} you can ignore the graceful shutdown, e.g. to keep a management port up
+         * while the shutdown of other listeners is in progress.
+         *
+         * @param supportGracefulShutdown Whether to support shutting down gracefully
+         */
+        public void setSupportGracefulShutdown(boolean supportGracefulShutdown) {
+            this.supportGracefulShutdown = supportGracefulShutdown;
         }
 
         /**

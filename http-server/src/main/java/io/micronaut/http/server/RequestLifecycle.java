@@ -25,7 +25,6 @@ import io.micronaut.core.execution.ExecutionFlow;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.core.type.ReturnType;
 import io.micronaut.core.util.CollectionUtils;
-import io.micronaut.http.HttpAttributes;
 import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -36,7 +35,12 @@ import io.micronaut.http.body.MessageBodyHandlerRegistry;
 import io.micronaut.http.exceptions.HttpStatusException;
 import io.micronaut.http.filter.FilterRunner;
 import io.micronaut.http.filter.GenericHttpFilter;
-import io.micronaut.http.server.exceptions.*;
+import io.micronaut.http.server.exceptions.ExceptionHandler;
+import io.micronaut.http.server.exceptions.NotAcceptableException;
+import io.micronaut.http.server.exceptions.NotAllowedException;
+import io.micronaut.http.server.exceptions.NotFoundException;
+import io.micronaut.http.server.exceptions.NotWebSocketRequestException;
+import io.micronaut.http.server.exceptions.UnsupportedMediaException;
 import io.micronaut.http.server.exceptions.response.ErrorContext;
 import io.micronaut.http.server.types.files.FileCustomizableResponseType;
 import io.micronaut.inject.BeanDefinition;
@@ -45,6 +49,7 @@ import io.micronaut.inject.qualifiers.Qualifiers;
 import io.micronaut.json.JsonSyntaxException;
 import io.micronaut.web.router.DefaultRouteInfo;
 import io.micronaut.web.router.DefaultUriRouteMatch;
+import io.micronaut.web.router.RouteAttributes;
 import io.micronaut.web.router.RouteInfo;
 import io.micronaut.web.router.RouteMatch;
 import io.micronaut.web.router.UriRouteMatch;
@@ -249,7 +254,8 @@ public class RequestLifecycle {
             }
             if (RouteExecutor.isIgnorable(cause)) {
                 RouteExecutor.logIgnoredException(cause);
-                return ExecutionFlow.empty();
+                // the client won't see this response, but we need one for filters and such
+                return ExecutionFlow.just(HttpResponse.badRequest("Stream closed"));
             }
             return createDefaultErrorResponseFlow(request, cause);
         }
@@ -257,7 +263,7 @@ public class RequestLifecycle {
 
     private Class<?> findDeclaringType(HttpRequest<?> request) {
         // find the origination of the route
-        Optional<RouteInfo> previousRequestRouteInfo = request.getAttribute(HttpAttributes.ROUTE_INFO, RouteInfo.class);
+        Optional<RouteInfo<?>> previousRequestRouteInfo = RouteAttributes.getRouteInfo(request);
         return previousRequestRouteInfo.map(RouteInfo::getDeclaringType).orElse(null);
     }
 
@@ -273,7 +279,7 @@ public class RequestLifecycle {
                 )
                 .onErrorResume(u -> createDefaultErrorResponseFlow(request, u))
                 .<HttpResponse<?>>map(response -> {
-                    response.setAttribute(HttpAttributes.EXCEPTION, cause);
+                    RouteAttributes.setException(response, cause);
                     return response;
                 })
                 .onErrorResume(throwable -> createDefaultErrorResponseFlow(request, throwable));
@@ -305,8 +311,10 @@ public class RequestLifecycle {
                 if (routeExecutor.serverConfiguration.isLogHandledExceptions()) {
                     routeExecutor.logException(cause);
                 }
-                Object result = handler.handle(request, cause);
-                return routeExecutor.createResponseForBody(propagatedContext, request, result, routeInfo, null);
+                try (PropagatedContext.Scope ignore = propagatedContext.propagate()) {
+                    Object result = handler.handle(request, cause);
+                    return routeExecutor.createResponseForBody(propagatedContext, request, result, routeInfo, null);
+                }
             } catch (Throwable e) {
                 return createDefaultErrorResponseFlow(request, e);
             }
@@ -320,7 +328,7 @@ public class RequestLifecycle {
         }
         return responseFlow
             .<HttpResponse<?>>map(response -> {
-                response.setAttribute(HttpAttributes.EXCEPTION, cause);
+                RouteAttributes.setException(response, cause);
                 return response;
             })
             .onErrorResume(throwable -> createDefaultErrorResponseFlow(request, throwable));
@@ -339,7 +347,7 @@ public class RequestLifecycle {
             FilterRunner filterRunner = new FilterRunner(httpFilters, responseProvider) {
                 @Override
                 protected ExecutionFlow<HttpResponse<?>> processResponse(HttpRequest<?> request, HttpResponse<?> response, PropagatedContext propagatedContext) {
-                    RouteInfo<?> routeInfo = response.getAttribute(HttpAttributes.ROUTE_INFO, RouteInfo.class).orElse(null);
+                    RouteInfo<?> routeInfo = RouteAttributes.getRouteInfo(response).orElse(null);
                     return handleStatusException(request, response, routeInfo, propagatedContext)
                         .onErrorResume(throwable -> onErrorNoFilter(request, throwable, propagatedContext));
                 }
@@ -409,7 +417,7 @@ public class RequestLifecycle {
 
                 @Override
                 protected ExecutionFlow<HttpResponse<?>> processResponse(HttpRequest<?> request, HttpResponse<?> response, PropagatedContext propagatedContext) {
-                    RouteInfo<?> routeInfo = response.getAttribute(HttpAttributes.ROUTE_INFO, RouteInfo.class).orElse(null);
+                    RouteInfo<?> routeInfo = RouteAttributes.getRouteInfo(response).orElse(null);
                     return handleStatusException(request, response, routeInfo, propagatedContext)
                         .onErrorResume(throwable -> onErrorNoFilter(request, throwable, propagatedContext));
                 }
@@ -479,12 +487,13 @@ public class RequestLifecycle {
             final String routeMethod = anyRoute.getRouteInfo().getHttpMethodName();
             if (!requestMethodName.equals(routeMethod)) {
                 allowedMethods.add(routeMethod);
-            }
-            if (contentType != null && !anyRoute.getRouteInfo().doesConsume(contentType)) {
-                acceptableContentTypes.addAll(anyRoute.getRouteInfo().getConsumes());
-            }
-            if (hasAcceptHeader && !anyRoute.getRouteInfo().doesProduce(acceptedTypes)) {
-                produceableContentTypes.addAll(anyRoute.getRouteInfo().getProduces());
+            } else {
+                if (contentType != null && !anyRoute.getRouteInfo().doesConsume(contentType)) {
+                    acceptableContentTypes.addAll(anyRoute.getRouteInfo().getConsumes());
+                }
+                if (hasAcceptHeader && !anyRoute.getRouteInfo().doesProduce(acceptedTypes)) {
+                    produceableContentTypes.addAll(anyRoute.getRouteInfo().getProduces());
+                }
             }
             declaringType = anyRoute.getDeclaringType();
         }

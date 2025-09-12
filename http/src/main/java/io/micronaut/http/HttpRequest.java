@@ -126,6 +126,20 @@ public interface HttpRequest<B> extends HttpMessage<B> {
     }
 
     /**
+     * Set the user principal.
+     *
+     * @param principal The principal
+     * @since 4.8.0
+     */
+    default void setUserPrincipal(@Nullable Principal principal) {
+        if (principal != null) {
+            setAttribute(HttpAttributes.PRINCIPAL, principal);
+        } else {
+            removeAttribute(HttpAttributes.PRINCIPAL, Principal.class);
+        }
+    }
+
+    /**
      * @return Get the raw, percent-encoded path without any parameters
      */
     default @NonNull String getPath() {
@@ -444,5 +458,25 @@ public interface HttpRequest<B> extends HttpMessage<B> {
         Objects.requireNonNull(uri, "Argument [uri] is required");
         Objects.requireNonNull(httpMethodName, "Argument [httpMethodName] is required");
         return HttpRequestFactory.INSTANCE.create(httpMethod, uri, httpMethodName);
+    }
+
+    /**
+     * Returns a mutable request based on this request.
+     * @return the mutable request
+     * @since 4.7
+     */
+    default MutableHttpRequest<B> toMutableRequest() {
+        if (this instanceof MutableHttpRequest<B> mutableHttpRequest) {
+            return mutableHttpRequest;
+        }
+        MutableHttpRequest<B> mutableHttpRequest = HttpRequest.create(getMethod(), getUri().toString());
+        getBody().ifPresent(mutableHttpRequest::body);
+        getHeaders().forEach((name, value) -> {
+            for (String val : value) {
+                mutableHttpRequest.header(name, val);
+            }
+        });
+        mutableHttpRequest.getAttributes().putAll(getAttributes());
+        return mutableHttpRequest;
     }
 }

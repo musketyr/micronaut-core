@@ -17,6 +17,8 @@ package io.micronaut.http.server;
 
 import io.micronaut.context.BeanContext;
 import io.micronaut.context.exceptions.BeanCreationException;
+import io.micronaut.context.propagation.instrument.execution.ContextPropagatingExecutorService;
+import io.micronaut.context.propagation.instrument.execution.ContextPropagatingScheduledExecutorService;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
@@ -30,7 +32,7 @@ import io.micronaut.core.io.buffer.ReferenceCounted;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.type.ReturnType;
-import io.micronaut.http.HttpAttributes;
+import io.micronaut.http.BasicHttpAttributes;
 import io.micronaut.http.HttpHeaders;
 import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
@@ -41,6 +43,7 @@ import io.micronaut.http.MutableHttpHeaders;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.bind.binders.ContinuationArgumentBinder;
 import io.micronaut.http.body.MessageBodyWriter;
+import io.micronaut.http.body.stream.BaseSharedBuffer;
 import io.micronaut.http.codec.CodecException;
 import io.micronaut.http.context.ServerHttpRequestContext;
 import io.micronaut.http.context.ServerRequestContext;
@@ -52,10 +55,9 @@ import io.micronaut.http.server.exceptions.response.ErrorResponseProcessor;
 import io.micronaut.inject.BeanType;
 import io.micronaut.inject.MethodReference;
 import io.micronaut.scheduling.executor.ExecutorSelector;
-import io.micronaut.scheduling.instrument.InstrumentedExecutorService;
-import io.micronaut.scheduling.instrument.InstrumentedScheduledExecutorService;
 import io.micronaut.web.router.DefaultRouteInfo;
 import io.micronaut.web.router.MethodBasedRouteInfo;
+import io.micronaut.web.router.RouteAttributes;
 import io.micronaut.web.router.RouteInfo;
 import io.micronaut.web.router.RouteMatch;
 import io.micronaut.web.router.Router;
@@ -72,11 +74,11 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
+import java.nio.channels.ClosedChannelException;
 import java.time.LocalDateTime;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
@@ -85,7 +87,6 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static io.micronaut.core.util.KotlinUtils.isKotlinCoroutineSuspended;
-import static io.micronaut.http.HttpAttributes.AVAILABLE_HTTP_METHODS;
 import static io.micronaut.inject.beans.KotlinExecutableMethodUtils.isKotlinFunctionReturnTypeUnit;
 
 /**
@@ -177,26 +178,17 @@ public final class RouteExecutor {
 
     @Nullable
     UriRouteMatch<Object, Object> findRouteMatch(HttpRequest<?> httpRequest) {
-        UriRouteMatch<Object, Object> routeMatch = router.findClosest(httpRequest);
-
-        if (routeMatch == null && httpRequest.getMethod().equals(HttpMethod.OPTIONS)) {
-            List<UriRouteMatch<Object, Object>> anyUriRoutes = router.findAny(httpRequest);
-            if (!anyUriRoutes.isEmpty()) {
-                setRouteAttributes(httpRequest, anyUriRoutes.get(0));
-                httpRequest.setAttribute(AVAILABLE_HTTP_METHODS, anyUriRoutes.stream().map(UriRouteMatch::getHttpMethod).toList());
-            }
-        }
-        return routeMatch;
+        return router.findClosest(httpRequest);
     }
 
     static void setRouteAttributes(HttpRequest<?> request, UriRouteMatch<Object, Object> route) {
         setRouteAttributes(request, (RouteMatch<?>) route);
-        request.setAttribute(HttpAttributes.URI_TEMPLATE, route.getRouteInfo().getUriMatchTemplate().toString());
+        BasicHttpAttributes.setUriTemplate(request, route.getRouteInfo().getUriMatchTemplate().toString());
     }
 
     static void setRouteAttributes(HttpRequest<?> request, RouteMatch<?> route) {
-        request.setAttribute(HttpAttributes.ROUTE_MATCH, route);
-        request.setAttribute(HttpAttributes.ROUTE_INFO, route.getRouteInfo());
+        RouteAttributes.setRouteMatch(request, route);
+        RouteAttributes.setRouteInfo(request, route.getRouteInfo());
     }
 
     /**
@@ -211,8 +203,8 @@ public final class RouteExecutor {
                                                              Throwable cause) {
         logException(cause);
         MutableHttpResponse<?> mutableHttpResponse = HttpResponse.serverError();
-        mutableHttpResponse.setAttribute(HttpAttributes.EXCEPTION, cause);
-        mutableHttpResponse.setAttribute(HttpAttributes.ROUTE_INFO, new DefaultRouteInfo<>(
+        RouteAttributes.setException(mutableHttpResponse, cause);
+        RouteAttributes.setRouteInfo(mutableHttpResponse, new DefaultRouteInfo<>(
                 ReturnType.of(MutableHttpResponse.class, Argument.OBJECT_ARGUMENT),
                 Object.class,
                 true,
@@ -283,6 +275,9 @@ public final class RouteExecutor {
     }
 
     static boolean isIgnorable(Throwable cause) {
+        if (cause instanceof ClosedChannelException || cause instanceof BaseSharedBuffer.IncorrectContentLengthException) {
+            return true;
+        }
         String message = cause.getMessage();
         return cause instanceof IOException && message != null && IGNORABLE_ERROR_MESSAGE.matcher(message).matches();
     }
@@ -381,45 +376,18 @@ public final class RouteExecutor {
         if (executor == null) {
             return Flux.from(publisher).subscribeOn(Schedulers.fromExecutor(command -> propagatedContext.wrap(command).run()));
         }
-        if (executor instanceof InstrumentedExecutorService instrumentedExecutorService) {
-            executor = instrumentedExecutorService.getTarget();
+        Optional<ExecutorService> wrappedTarget = ContextPropagatingExecutorService.unwrap(executor);
+        if (wrappedTarget.isPresent()) {
+            executor = wrappedTarget.get();
         }
         if (executor instanceof ScheduledExecutorService scheduledExecutorService) {
-            executor = new InstrumentedScheduledExecutorService() {
-                @Override
-                public ScheduledExecutorService getTarget() {
-                    return scheduledExecutorService;
-                }
-
-                @Override
-                public <X> Callable<X> instrument(Callable<X> task) {
-                    return propagatedContext.wrap(task);
-                }
-
-                @Override
-                public Runnable instrument(Runnable command) {
-                    return propagatedContext.wrap(command);
-                }
-            };
+            executor = new ContextPropagatingScheduledExecutorService(
+                scheduledExecutorService,
+                propagatedContext
+            );
         } else {
             ExecutorService finalExecutor = executor;
-            executor = new InstrumentedExecutorService() {
-
-                @Override
-                public ExecutorService getTarget() {
-                    return finalExecutor;
-                }
-
-                @Override
-                public <X> Callable<X> instrument(Callable<X> task) {
-                    return propagatedContext.wrap(task);
-                }
-
-                @Override
-                public Runnable instrument(Runnable command) {
-                    return propagatedContext.wrap(command);
-                }
-            };
+            executor = new ContextPropagatingExecutorService(finalExecutor, propagatedContext);
         }
         final Scheduler scheduler = Schedulers.fromExecutorService(executor);
         return Flux.from(publisher)
@@ -573,13 +541,15 @@ public final class RouteExecutor {
                 referenceCounted.release();
             }
             response.body(null);
-            response.attribute(HttpAttributes.HEAD_BODY, o);
+            if (o != null) {
+                RouteAttributes.setHeadBody(response, o);
+            }
         }
         applyConfiguredHeaders(response.getHeaders());
         if (routeMatch != null) {
-            response.setAttribute(HttpAttributes.ROUTE_MATCH, routeMatch);
+            RouteAttributes.setRouteMatch(response, routeMatch);
         }
-        response.setAttribute(HttpAttributes.ROUTE_INFO, routeInfo);
+        RouteAttributes.setRouteInfo(response, routeInfo);
         response.bodyWriter((MessageBodyWriter) routeInfo.getMessageBodyWriter());
         return response;
     }
@@ -774,7 +744,6 @@ public final class RouteExecutor {
         ).contextWrite(cv -> ReactorPropagation.addPropagatedContext(cv, propagatedContext).put(ServerRequestContext.KEY, request));
 
         return Mono.<MutableHttpResponse<?>>just(response
-            .header(HttpHeaders.TRANSFER_ENCODING, "chunked")
             .header(HttpHeaders.CONTENT_TYPE, mediaType)
             .body(ReactivePropagation.propagate(propagatedContext, bodyPublisher)))
             .contextWrite(context -> ReactorPropagation.addPropagatedContext(context, propagatedContext).put(ServerRequestContext.KEY, request));

@@ -22,7 +22,6 @@ import io.micronaut.annotation.processing.JavaAnnotationMetadataBuilder
 import io.micronaut.annotation.processing.JavaNativeElementsHelper
 import io.micronaut.annotation.processing.ModelUtils
 import io.micronaut.annotation.processing.TypeElementVisitorProcessor
-import io.micronaut.annotation.processing.visitor.JavaClassElement
 import io.micronaut.annotation.processing.visitor.JavaElementFactory
 import io.micronaut.annotation.processing.visitor.JavaVisitorContext
 import io.micronaut.aop.internal.InterceptorRegistryBean
@@ -34,6 +33,7 @@ import io.micronaut.context.Qualifier
 import io.micronaut.context.env.Environment
 import io.micronaut.context.event.ApplicationEventPublisherFactory
 import io.micronaut.core.annotation.AnnotationMetadata
+import io.micronaut.core.annotation.AnnotationMetadataProvider
 import io.micronaut.core.annotation.Experimental
 import io.micronaut.core.annotation.NonNull
 import io.micronaut.core.annotation.Nullable
@@ -109,8 +109,15 @@ abstract class AbstractTypeElementSpec extends Specification {
         return new JavaElementFactory(visitorContext).newClassElement(typeElement, visitorContext.getElementAnnotationMetadataFactory())
     }
 
+    <T> T buildClassElement(@Language("java") String packageInfo, @Language("java") String cls, Closure<T> closure) {
+        return buildClassElement(new Files().add("Test", cls).add("package-info", packageInfo), closure)
+    }
+
     <T> T buildClassElement(@Language("java") String cls, Closure<T> closure) {
-        buildTypeElementInfo(cls) { TypeElementInfo typeElementInfo ->
+        return buildClassElement(new Files().add("", cls), closure)
+    }
+    protected <T> T buildClassElement(Files files, Closure<T> closure) {
+        buildTypeElementInfo(files) { TypeElementInfo typeElementInfo ->
             TypeElement typeElement = typeElementInfo.typeElement
             def lastTask = typeElementInfo.javaParser.lastTask.get()
             def elements = lastTask.elements
@@ -161,10 +168,10 @@ abstract class AbstractTypeElementSpec extends Specification {
     }
 
     /**
-    * Build and return a {@link BeanIntrospection} for the given class name and class data.
-    *
-    * @return the introspection if it is correct
-    **/
+     * Build and return a {@link BeanIntrospection} for the given class name and class data.
+     *
+     * @return the introspection if it is correct
+     **/
     protected BeanIntrospection buildBeanIntrospection(String className, @Language("java") String cls) {
         def simpleName = NameUtils.getSimpleName(className)
         def beanDefName = (simpleName.startsWith('$') ? '' : '$') + simpleName + '$Introspection'
@@ -264,9 +271,38 @@ class Test {
      * @return The context. Should be shutdown after use
      */
     ApplicationContext buildContext(String className, @Language("java") String cls, boolean includeAllBeans = false, Map properties = [:]) {
+        return buildContext(null, className, cls, includeAllBeans, properties)
+    }
+
+    /**
+     * Builds a {@link ApplicationContext} containing only the classes produced by the given class.
+     *
+     * @param className The class name
+     * @param cls The class data
+     * @return The context. Should be shutdown after use
+     */
+    ApplicationContext buildContext(@Nullable @Language("java") String packageJava, String className, @Language("java") String cls, boolean includeAllBeans = false, Map properties = [:]) {
+        Files files = new Files()
+        files.add(className, cls)
+        if (packageJava != null) {
+            files.add("package-info", packageJava)
+        }
+        return buildContext(files, includeAllBeans, properties)
+    }
+
+    /**
+     * Builds a {@link ApplicationContext} containing only the classes produced by the given class.
+     *
+     * @param className The class name
+     * @param cls The class data
+     * @return The context. Should be shutdown after use
+     */
+    ApplicationContext buildContext(Files files, boolean includeAllBeans = false, Map properties = [:]) {
         try (def parser = newJavaParser()) {
-            def files = parser.generate(className, cls)
-            ClassLoader classLoader = new JavaFileObjectClassLoader(files)
+            def javaFiles = parser.generate(
+                    files.files.stream().map { JavaFileObjects.forSourceString(it.key, it.value) }.toArray(JavaFileObject[]::new)
+            )
+            ClassLoader classLoader = new JavaFileObjectClassLoader(javaFiles)
 
             def builder = ApplicationContext.builder()
             builder.classLoader(classLoader)
@@ -277,7 +313,7 @@ class Test {
             def context = new DefaultApplicationContext((ApplicationContextConfiguration) builder) {
                 @Override
                 protected List<BeanDefinitionReference> resolveBeanDefinitionReferences() {
-                    def references = StreamSupport.stream(files.spliterator(), false)
+                    def references = StreamSupport.stream(javaFiles.spliterator(), false)
                             .filter({ JavaFileObject jfo ->
                                 jfo.kind == JavaFileObject.Kind.CLASS && (jfo.name.endsWith(BeanDefinitionWriter.CLASS_SUFFIX + '$Reference' + ".class") ||  jfo.name.endsWith(BeanDefinitionWriter.CLASS_SUFFIX + ".class"))
                             })
@@ -391,14 +427,20 @@ class Test {
 
     }
 
-    protected <T> T buildTypeElementInfo(@Language("java") String cls, Closure<T> callable) {
-        List<Element> elements = []
-
+    protected <T> T buildTypeElementInfo(Files files, Closure<T> callable) {
         try (def parser = newJavaParser()) {
-            parser.parseLines("",
-                    cls
-            ).each { elements.add(it) }
-            def element = elements ? elements[0] : null
+            JavaFileObject[] sources = files.files.stream()
+                    .map { e -> JavaFileObjects.forSourceLines(e.key, e.value) }
+                    .toArray(JavaFileObject[]::new)
+            Iterator<? extends Element> elements = parser.parse(sources).iterator()
+
+            TypeElement element = null
+            for (Element e : elements) {
+                if (e instanceof TypeElement) {
+                    element = e
+                    break
+                }
+            }
 
             return callable.call( new TypeElementInfo(
                     typeElement: element,
@@ -539,23 +581,20 @@ class Test {
 
     @CompileStatic
     protected AnnotationMetadata writeAndLoadMetadata(String className, AnnotationMetadata toWrite) {
-        ByteArrayOutputStream stream = new ByteArrayOutputStream()
-        new AnnotationMetadataWriter(className, null, toWrite, true)
-                .writeTo(stream)
+        byte[] bytecode = AnnotationMetadataWriter.write(className, toWrite)
         className = className + AnnotationMetadata.CLASS_NAME_SUFFIX
         ClassLoader classLoader = new ClassLoader() {
             @Override
             protected Class<?> findClass(String name) throws ClassNotFoundException {
                 if (name == className) {
-                    byte[] bytes = stream.toByteArray()
+                    byte[] bytes = bytecode
                     return defineClass(name, bytes, 0, bytes.length)
                 }
                 return super.findClass(name)
             }
         }
 
-        AnnotationMetadata metadata = (AnnotationMetadata) classLoader.loadClass(className).newInstance()
-        return metadata
+        return ((AnnotationMetadataProvider) classLoader.loadClass(className).newInstance()).getAnnotationMetadata()
     }
 
     protected JavaAnnotationMetadataBuilder newJavaAnnotationBuilder() {
@@ -601,13 +640,13 @@ class Test {
                 @Override
                 protected List<AnnotationTransformer<Annotation>> getAnnotationTransformers(@NonNull String annotationName) {
                     def loadedTransformers = super.getAnnotationTransformers(annotationName)
-                    def localTransfomers = getLocalAnnotationTransformers(annotationName)
-                    if (localTransfomers) {
+                    def localTransformers = getLocalAnnotationTransformers(annotationName)
+                    if (localTransformers) {
                         def newList = []
                         if (loadedTransformers) {
                             newList.addAll(loadedTransformers)
                         }
-                        newList.addAll(localTransfomers)
+                        newList.addAll(localTransformers)
                         return newList
                     } else {
                         return loadedTransformers
@@ -674,5 +713,21 @@ class Test {
     static class TypeElementInfo {
         TypeElement typeElement
         JavaParser javaParser
+    }
+
+    @CompileStatic
+    static class Files {
+
+        private List<Map.Entry<String, String>> files = new ArrayList<>()
+
+        Files add(String filename, @Language("java") String code) {
+            files.add(Map.entry(filename, code))
+            return this
+        }
+
+        List<Map.Entry<String, String>> getFiles() {
+            return files
+        }
+
     }
 }

@@ -16,19 +16,27 @@
 package io.micronaut.http.netty.body;
 
 import io.micronaut.buffer.netty.NettyByteBufferFactory;
+import io.micronaut.buffer.netty.NettyReadBufferFactory;
 import io.micronaut.context.annotation.BootstrapContextCompatible;
 import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.Internal;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.io.buffer.ByteBuffer;
 import io.micronaut.core.io.buffer.ByteBufferFactory;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.type.Headers;
 import io.micronaut.core.type.MutableHeaders;
+import io.micronaut.http.HttpRequest;
+import io.micronaut.http.HttpResponse;
 import io.micronaut.http.MediaType;
+import io.micronaut.http.body.ByteBodyFactory;
 import io.micronaut.http.body.ChunkedMessageBodyReader;
+import io.micronaut.http.body.CloseableByteBody;
+import io.micronaut.http.body.ResponseBodyWriter;
 import io.micronaut.http.body.TypedMessageBodyHandler;
 import io.micronaut.http.codec.CodecException;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
 import jakarta.inject.Singleton;
@@ -49,7 +57,7 @@ import java.io.OutputStream;
 @Singleton
 @Experimental
 @BootstrapContextCompatible
-public final class NettyByteBufMessageBodyHandler implements TypedMessageBodyHandler<ByteBuf>, ChunkedMessageBodyReader<ByteBuf> {
+public final class NettyByteBufMessageBodyHandler implements TypedMessageBodyHandler<ByteBuf>, ChunkedMessageBodyReader<ByteBuf>, ResponseBodyWriter<ByteBuf> {
 
     @Override
     public Argument<ByteBuf> getType() {
@@ -91,4 +99,14 @@ public final class NettyByteBufMessageBodyHandler implements TypedMessageBodyHan
         return NettyByteBufferFactory.DEFAULT.wrap(object);
     }
 
+    @Override
+    public @NonNull CloseableByteBody writePiece(@NonNull ByteBodyFactory bodyFactory, @NonNull HttpRequest<?> request, @NonNull HttpResponse<?> response, @NonNull Argument<ByteBuf> type, @NonNull MediaType mediaType, ByteBuf object) throws CodecException {
+        NettyReadBufferFactory readBufferFactory;
+        if (bodyFactory.readBufferFactory() instanceof NettyReadBufferFactory nrbf) {
+            readBufferFactory = nrbf;
+        } else {
+            readBufferFactory = NettyReadBufferFactory.of(ByteBufAllocator.DEFAULT);
+        }
+        return bodyFactory.adapt(readBufferFactory.adapt(object));
+    }
 }

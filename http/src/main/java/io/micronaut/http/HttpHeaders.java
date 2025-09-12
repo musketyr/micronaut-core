@@ -21,7 +21,6 @@ import io.micronaut.http.util.HttpHeadersUtil;
 import jakarta.annotation.Nullable;
 
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -623,6 +622,17 @@ public interface HttpHeaders extends Headers {
     ));
 
     /**
+     * Whether the given key is contained within these values.
+     *
+     * @param name The key name
+     * @return True if it is
+     * @since 4.8.0
+     */
+    default boolean contains(CharSequence name) {
+        return contains(name.toString());
+    }
+
+    /**
      * Obtain the date header.
      *
      * @param name The header name
@@ -733,17 +743,7 @@ public interface HttpHeaders extends Headers {
      */
     default Optional<Charset> findAcceptCharset() {
         return findFirst(HttpHeaders.ACCEPT_CHARSET)
-            .map(text -> {
-                text = HttpHeadersUtil.splitAcceptHeader(text);
-                if (text != null) {
-                    try {
-                        return Charset.forName(text);
-                    } catch (Exception ignored) {
-                    }
-                }
-                // default to UTF-8
-                return StandardCharsets.UTF_8;
-            });
+            .map(HttpHeadersUtil::parseAcceptCharset);
     }
 
     /**

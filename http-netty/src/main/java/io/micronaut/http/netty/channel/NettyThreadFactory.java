@@ -43,10 +43,10 @@ import java.util.concurrent.ThreadFactory;
 @Singleton
 @Factory
 @TypeHint(value = {
-        NioServerSocketChannel.class,
-        NioSocketChannel.class
+    NioServerSocketChannel.class,
+    NioSocketChannel.class
 }, typeNames = {"sun.security.ssl.SSLContextImpl$TLSContext"},
-   accessType = {TypeHint.AccessType.ALL_DECLARED_CONSTRUCTORS, TypeHint.AccessType.ALL_DECLARED_FIELDS, TypeHint.AccessType.ALL_PUBLIC_CONSTRUCTORS}
+    accessType = {TypeHint.AccessType.ALL_DECLARED_CONSTRUCTORS, TypeHint.AccessType.ALL_DECLARED_FIELDS, TypeHint.AccessType.ALL_PUBLIC_CONSTRUCTORS}
 )
 @BootstrapContextCompatible
 public class NettyThreadFactory {
@@ -92,8 +92,9 @@ public class NettyThreadFactory {
      *
      * @return The number of threads
      */
+    @Deprecated(forRemoval = true)
     public static int getDefaultEventLoopThreads() {
-        return EventLoopThreadsHolder.DEFAULT_EVENT_LOOP_THREADS;
+        return Math.max(1, SystemPropertyUtil.getInt("io.netty.eventLoopThreads", NettyRuntime.availableProcessors() * 2));
     }
 
     /**
@@ -107,7 +108,7 @@ public class NettyThreadFactory {
     protected ThreadFactory nettyThreadFactory() {
         String poolName = "default-" + DefaultThreadFactory.toPoolName(NioEventLoopGroup.class);
         if (configuration.isDefaultThreadFactoryReactorNonBlocking()) {
-            return new DefaultThreadFactory(poolName) {
+            return new DefaultThreadFactory(poolName, configuration.isDefaultThreadFactoryDaemon(), configuration.getDefaultThreadFactoryPriority()) {
                 @SuppressWarnings("InstantiatingAThreadWithDefaultRunMethod")
                 @Override
                 protected Thread newThread(Runnable r, String name) {
@@ -115,12 +116,8 @@ public class NettyThreadFactory {
                 }
             };
         } else {
-            return new DefaultThreadFactory(poolName);
+            return new DefaultThreadFactory(poolName, configuration.isDefaultThreadFactoryDaemon(), configuration.getDefaultThreadFactoryPriority());
         }
-    }
-
-    private static final class EventLoopThreadsHolder {
-        static final int DEFAULT_EVENT_LOOP_THREADS = Math.max(1, SystemPropertyUtil.getInt("io.netty.eventLoopThreads", NettyRuntime.availableProcessors() * 2));
     }
 
     private static final class NonBlockingFastThreadLocalThread extends FastThreadLocalThread implements NonBlocking {

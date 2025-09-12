@@ -25,6 +25,7 @@ import io.micronaut.inject.annotation.AbstractAnnotationMetadataBuilder;
 import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.Element;
 import io.micronaut.inject.ast.ElementFactory;
+import io.micronaut.inject.ast.PackageElement;
 import io.micronaut.inject.ast.annotation.ElementAnnotationMetadataFactory;
 import io.micronaut.inject.writer.ClassWriterOutputVisitor;
 import io.micronaut.inject.writer.GeneratedFile;
@@ -32,9 +33,9 @@ import io.micronaut.inject.writer.GeneratedFile;
 import java.net.URI;
 import java.net.URL;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -89,7 +90,7 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
      *
      * @return The annotation metadata builder
      *
-     * @since  4.0.0
+     * @since 4.0.0
      */
     @Internal
     @NonNull
@@ -176,13 +177,13 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
             return projectDir;
         }
         // let's find the projectDir
-        Optional<GeneratedFile> dummyFile = visitGeneratedFile("dummy" + System.nanoTime());
+        Optional<GeneratedFile> dummyFile = visitGeneratedFile("dummy");
         if (dummyFile.isPresent()) {
             URI uri = dummyFile.get().toURI();
             // happens in tests 'mem:///CLASS_OUTPUT/dummy'
             if (uri.getScheme() != null && !uri.getScheme().equals("mem")) {
                 // assume files are generated in 'build' or 'target' directories
-                Path dummy = Paths.get(uri).normalize();
+                Path dummy = Path.of(uri).normalize();
                 while (dummy != null) {
                     Path dummyFileName = dummy.getFileName();
                     if (dummyFileName != null && ("build".equals(dummyFileName.toString()) || "target".equals(dummyFileName.toString()))) {
@@ -216,7 +217,7 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
         Optional<GeneratedFile> dummy = visitMetaInfFile("dummy", Element.EMPTY_ELEMENT_ARRAY);
         if (dummy.isPresent()) {
             // we want the parent directory of META-INF/dummy
-            Path classesOutputDir = Paths.get(dummy.get().toURI()).getParent().getParent();
+            Path classesOutputDir = Path.of(dummy.get().toURI()).getParent().getParent();
             return Optional.of(classesOutputDir);
         }
         return Optional.empty();
@@ -281,6 +282,17 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
     }
 
     /**
+     * Find all the classes within the given package.
+     *
+     * @param packageElement    The package
+     * @return The class elements
+     * @see 4.10
+     */
+    default @NonNull List<ClassElement> getClassElements(@NonNull PackageElement packageElement) {
+        return List.of(getClassElements(packageElement.getName(), "*"));
+    }
+
+    /**
      * The annotation processor environment custom options.
      * <p><b>All options names MUST start with {@link VisitorContext#MICRONAUT_BASE_OPTION_NAME}</b></p>
      *
@@ -297,7 +309,9 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
      * The generated resources are intended to be strings paths relative to the classpath root.
      *
      * @return a possibly empty collection of resource paths
+     * @deprecated No longer used
      */
+    @Deprecated(forRemoval = true, since = "4.10")
     @Experimental
     default Collection<String> getGeneratedResources() {
         info("EXPERIMENTAL: Compile time resource contribution to the context is experimental", null);
@@ -309,7 +323,9 @@ public interface VisitorContext extends MutableConvertibleValues<Object>, ClassW
      * The generated resources are intended to be strings paths relative to the classpath root
      *
      * @param resource the relative path to add
+     * @deprecated No longer used
      */
+    @Deprecated(forRemoval = true, since = "4.10")
     @Experimental
     default void addGeneratedResource(String resource) {
         info("EXPERIMENTAL: Compile time resource contribution to the context is experimental", null);

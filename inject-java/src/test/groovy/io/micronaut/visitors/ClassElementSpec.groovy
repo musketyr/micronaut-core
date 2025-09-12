@@ -15,7 +15,6 @@
  */
 package io.micronaut.visitors
 
-
 import io.micronaut.annotation.processing.test.AbstractTypeElementSpec
 import io.micronaut.annotation.processing.visitor.JavaClassElement
 import io.micronaut.context.annotation.Replaces
@@ -39,15 +38,60 @@ import io.micronaut.inject.ast.WildcardElement
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Null
+import java.sql.SQLException
+import java.util.function.Supplier
 import spock.lang.IgnoreIf
 import spock.lang.Issue
 import spock.lang.Unroll
 import spock.util.environment.Jvm
 
-import java.sql.SQLException
-import java.util.function.Supplier
-
 class ClassElementSpec extends AbstractTypeElementSpec {
+
+    void "test duplicate methods"() {
+        expect:
+        buildClassElement('''
+package annbinding1;
+
+import java.lang.annotation.*;
+
+class MyBean implements Middle<String> {
+    void test() {
+    }
+}
+
+interface Middle<ParentIdT> extends Parent<ParentIdT> {
+    @Override
+    default String updateResource(String request, ParentIdT parentId) {
+        return Parent.super.updateResource(request,parentId);
+    }
+}
+interface Parent<ParentIdT> {
+    default String updateResource(
+            String request,
+            ParentIdT parentId) {
+        return "ok";
+    }
+}
+''') { ClassElement classElement ->
+            assert classElement.getMethods().collect { it.name } == ["test", "updateResource"]
+            classElement
+        }
+    }
+
+    void "test canonical name"() {
+        expect:
+        buildClassElement('''
+package test;
+
+record Outer() {
+    record Inner() {}
+}
+''') { ClassElement classElement ->
+            assert classElement.canonicalName == 'test.Outer'
+            assert classElement.getEnclosedElement(ElementQuery.ALL_INNER_CLASSES).get().canonicalName == 'test.Outer.Inner'
+            classElement
+        }
+    }
 
     void "test package-private methods with broken different package"() {
         when:
@@ -1179,6 +1223,105 @@ class MyBean {}
         superType.getTypeArguments().get('Q').getName() == 'test.Time'
         superType.getTypeArguments().get('U').getName() == 'test.TimeUnit'
 
+    }
+
+    void "test field type with generic in inner class"() {
+        given:
+        buildClassElement("""
+package test;
+
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.annotation.Controller;
+import io.micronaut.http.annotation.Get;
+import java.util.List;
+import java.util.Locale;
+
+@Controller("/test")
+class TestController {
+    @Get
+    public HttpResponse<ResponseObject<List<Dto>>> endpoint() {
+        return null;
+    }
+
+    public static class ResponseObject<T> {
+
+        public T body;
+    }
+
+    public static class Dto {
+
+        public Locale locale;
+    }
+}
+""") { ClassElement ce ->
+
+            def responseType = ce.methods[0].returnType
+
+            responseType.type.name == 'io.micronaut.http.HttpResponse'
+            assert responseType.typeArguments
+            assert responseType.typeArguments.size() == 1
+
+            def typeArg = responseType.firstTypeArgument.orElse(null)
+            assert typeArg
+            assert typeArg.fields
+            assert typeArg.fields.size() == 1
+
+            def bodyField = typeArg.fields[0]
+            assert bodyField.name == "body"
+            assert bodyField.genericType.name == "java.util.List"
+            assert bodyField.genericType.getFirstTypeArgument().get().name == 'test.TestController$Dto'
+        }
+    }
+
+    void "test field type with generic in inner super class"() {
+        given:
+        buildClassElement("""
+package test;
+
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.annotation.Controller;
+import io.micronaut.http.annotation.Get;
+import java.util.List;
+import java.util.Locale;
+
+@Controller("/test")
+class TestController {
+    @Get
+    public HttpResponse<ResponseObject<List<Dto>>> endpoint() {
+        return null;
+    }
+
+    public static class BaseResponseObject<T> {
+
+        public T body;
+    }
+
+    public static class ResponseObject<T> extends BaseResponseObject<T> {
+    }
+
+    public static class Dto {
+
+        public Locale locale;
+    }
+}
+""") { ClassElement ce ->
+
+            def responseType = ce.methods[0].returnType
+
+            responseType.type.name == 'io.micronaut.http.HttpResponse'
+            assert responseType.typeArguments
+            assert responseType.typeArguments.size() == 1
+
+            def typeArg = responseType.firstTypeArgument.orElse(null)
+            assert typeArg
+            assert typeArg.fields
+            assert typeArg.fields.size() == 1
+
+            def bodyField = typeArg.fields[0]
+            assert bodyField.name == "body"
+            assert bodyField.genericType.name == "java.util.List"
+            assert bodyField.genericType.getFirstTypeArgument().get().name == 'test.TestController$Dto'
+        }
     }
 
     @Issue('https://github.com/micronaut-projects/micronaut-openapi/issues/593')
@@ -3503,36 +3646,38 @@ class TestNamed {
     }
 }
 
-''')
-        def properties = ce.findMethod("method").get().getReturnType().getBeanProperties()
-                .stream()
-                .filter {it.getName() == "orderBy"}.findFirst()
-                .get()
-                .getGenericType()
-                .getFirstTypeArgument()
-                .get()
-                .getBeanProperties()
-        expect:
-            properties.stream().map {it.getName()}.sorted().toList() == [
+''', {
+            def properties = ce.findMethod("method").get().getReturnType().getBeanProperties()
+                    .stream()
+                    .filter {it.getName() == "orderBy"}.findFirst()
+                    .get()
+                    .getGenericType()
+                    .getFirstTypeArgument()
+                    .get()
+                    .getBeanProperties()
+
+            assert properties.stream().map {it.getName()}.sorted().toList() == [
                     "ignoreCase",
                     "direction",
                     "property",
                     "ascending"
             ].sort()
-            properties.stream()
+            assert properties.stream()
                     .filter { it.getName() == "direction" }
                     .findFirst()
                     .get()
                     .getType()
                     .isEnum()
-            properties.stream()
+            assert properties.stream()
                     .filter { it.getName() == "direction" }
                     .findFirst()
                     .get()
                     .getType() instanceof EnumElement
+        })
+
     }
 
-    private void assertListGenericArgument(ClassElement type, Closure cl) {
+    private static void assertListGenericArgument(ClassElement type, Closure cl) {
         def arg1 = type.getAllTypeArguments().get(List.class.name).get("E")
         def arg2 = type.getAllTypeArguments().get(Collection.class.name).get("E")
         def arg3 = type.getAllTypeArguments().get(Iterable.class.name).get("T")
@@ -3541,7 +3686,7 @@ class TestNamed {
         cl.call(arg3)
     }
 
-    private void assertMethodsByName(List<MethodElement> allMethods, String name, List<String> expectedDeclaringTypeSimpleNames) {
+    private static void assertMethodsByName(List<MethodElement> allMethods, String name, List<String> expectedDeclaringTypeSimpleNames) {
         Collection<MethodElement> methods = collectElements(allMethods, name)
         assert expectedDeclaringTypeSimpleNames.size() == methods.size()
         for (String expectedDeclaringTypeSimpleName : expectedDeclaringTypeSimpleNames) {
@@ -3549,7 +3694,7 @@ class TestNamed {
         }
     }
 
-    private void assertFieldsByName(List<FieldElement> allFields, String name, List<String> expectedDeclaringTypeSimpleNames) {
+    private static void assertFieldsByName(List<FieldElement> allFields, String name, List<String> expectedDeclaringTypeSimpleNames) {
         Collection<FieldElement> fields = collectElements(allFields, name)
         assert expectedDeclaringTypeSimpleNames.size() == fields.size()
         for (String expectedDeclaringTypeSimpleName : expectedDeclaringTypeSimpleNames) {
@@ -3557,13 +3702,13 @@ class TestNamed {
         }
     }
 
-    private boolean oneElementPresentWithDeclaringType(Collection<MemberElement> elements, String declaringTypeSimpleName) {
+    private static boolean oneElementPresentWithDeclaringType(Collection<MemberElement> elements, String declaringTypeSimpleName) {
         elements.stream()
                 .filter { it -> it.getDeclaringType().getSimpleName() == declaringTypeSimpleName }
                 .count() == 1
     }
 
-    static <T extends Element> Collection<T> collectElements(List<T> allElements, String name) {
+    private static <T extends Element> Collection<T> collectElements(List<T> allElements, String name) {
         return allElements.findAll { it.name == name }
     }
 }

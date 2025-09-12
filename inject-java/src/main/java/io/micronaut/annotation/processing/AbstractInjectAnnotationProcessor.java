@@ -16,6 +16,7 @@
 package io.micronaut.annotation.processing;
 
 import io.micronaut.annotation.processing.visitor.JavaVisitorContext;
+import io.micronaut.core.annotation.Generated;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.convert.value.MutableConvertibleValues;
 import io.micronaut.core.convert.value.MutableConvertibleValuesMap;
@@ -29,6 +30,7 @@ import javax.annotation.processing.Messager;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.TypeElement;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
@@ -36,6 +38,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -73,10 +76,15 @@ abstract class AbstractInjectAnnotationProcessor extends AbstractProcessor {
     protected MutableConvertibleValues<Object> visitorAttributes = new MutableConvertibleValuesMap<>();
     protected AnnotationProcessingOutputVisitor classWriterOutputVisitor;
     protected JavaVisitorContext javaVisitorContext;
+    protected Map<String, Object> postponedTypes = new LinkedHashMap<>();
     private boolean incremental = false;
     private final Set<String> supportedAnnotationTypes = new HashSet<>(5);
     private final Map<String, Boolean> isProcessedCache = new HashMap<>(30);
     private Set<String> processedTypes;
+
+    protected final boolean processingGeneratedAnnotation(Set<? extends TypeElement> annotations) {
+        return annotations.size() == 1 && Generated.class.getName().equals(annotations.iterator().next().getQualifiedName().toString());
+    }
 
     @Override
     public SourceVersion getSupportedSourceVersion() {
@@ -216,7 +224,8 @@ abstract class AbstractInjectAnnotationProcessor extends AbstractProcessor {
             modelUtils,
             filer,
             visitorAttributes,
-            getVisitorKind()
+            getVisitorKind(),
+            postponedTypes.keySet()
         );
     }
 

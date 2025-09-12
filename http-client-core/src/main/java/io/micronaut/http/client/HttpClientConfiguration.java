@@ -16,6 +16,7 @@
 package io.micronaut.http.client;
 
 import io.micronaut.context.env.CachedEnvironment;
+import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NextMajorVersion;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
@@ -91,6 +92,24 @@ public abstract class HttpClientConfiguration {
     public static final int DEFAULT_MAX_CONTENT_LENGTH = 1024 * 1024 * 10; // 10MiB;
 
     /**
+     * The default max header size in bytes.
+     */
+    @SuppressWarnings("WeakerAccess")
+    public static final int DEFAULT_MAX_HEADER_SIZE = 8192;
+
+    /**
+     * The default max initial line length for HTTP client codec in bytes.
+     */
+    @SuppressWarnings("WeakerAccess")
+    public static final int DEFAULT_MAX_INITIAL_LINE_LENGTH = 4096;
+
+    /**
+     * The default max chunk size for HTTP client codec in bytes.
+     */
+    @SuppressWarnings("WeakerAccess")
+    public static final int DEFAULT_MAX_CHUNK_SIZE = 8192;
+
+    /**
      * The default follow redirects value.
      */
     @SuppressWarnings("WeakerAccess")
@@ -140,6 +159,8 @@ public abstract class HttpClientConfiguration {
 
     private int maxContentLength = DEFAULT_MAX_CONTENT_LENGTH;
 
+    private int maxHeaderSize = DEFAULT_MAX_HEADER_SIZE;
+
     private Proxy.Type proxyType = Proxy.Type.DIRECT;
 
     private SocketAddress proxyAddress;
@@ -155,6 +176,7 @@ public abstract class HttpClientConfiguration {
     private boolean followRedirects = DEFAULT_FOLLOW_REDIRECTS;
 
     private boolean exceptionOnErrorStatus = DEFAULT_EXCEPTION_ON_ERROR_STATUS;
+    private boolean decompressionEnabled = true;
 
     private SslConfiguration sslConfiguration = new ClientSslConfiguration();
 
@@ -181,6 +203,8 @@ public abstract class HttpClientConfiguration {
 
     @Nullable
     private String addressResolverGroupName = null;
+
+    private String pcapLoggingPathPattern = null;
 
     /**
      * Default constructor.
@@ -215,6 +239,7 @@ public abstract class HttpClientConfiguration {
             this.logLevel = copy.logLevel;
             this.loggerName = copy.loggerName;
             this.maxContentLength = copy.maxContentLength;
+            this.maxHeaderSize = copy.maxHeaderSize;
             this.proxyAddress = copy.proxyAddress;
             this.proxyPassword = copy.proxyPassword;
             this.proxySelector = copy.proxySelector;
@@ -347,6 +372,29 @@ public abstract class HttpClientConfiguration {
      */
     public void setExceptionOnErrorStatus(boolean exceptionOnErrorStatus) {
         this.exceptionOnErrorStatus = exceptionOnErrorStatus;
+    }
+
+    /**
+     * Whether response content decompression is enabled in the Netty HTTP client.
+     * When disabled, the client will not add the HttpContentDecompressor to the pipeline
+     * and will receive the raw compressed response body and headers (e.g. Content-Encoding).
+     * Default: true.
+     *
+     * @return true if automatic content decompression is enabled
+     */
+    public boolean isDecompressionEnabled() {
+        return decompressionEnabled;
+    }
+
+    /**
+     * Enable or disable automatic response content decompression in the Netty HTTP client.
+     * Disabling this can be useful for proxy or testing scenarios where the compressed payload
+     * and Content-Encoding header need to be observed.
+     *
+     * @param decompressionEnabled true to enable decompression, false to disable it
+     */
+    public void setDecompressionEnabled(boolean decompressionEnabled) {
+        this.decompressionEnabled = decompressionEnabled;
     }
 
     /**
@@ -616,6 +664,24 @@ public abstract class HttpClientConfiguration {
     }
 
     /**
+     * [available in the Netty HTTP client].
+     *
+     * @return The maximum header size the client can handle
+     */
+    public int getMaxHeaderSize() {
+        return maxHeaderSize;
+    }
+
+    /**
+     * Sets the maximum header size the client can handle. Default value ({@value io.micronaut.http.client.HttpClientConfiguration#DEFAULT_MAX_HEADER_SIZE}).
+     *
+     * @param maxHeaderSize The maximum header size the client can handle
+     */
+    public void setMaxHeaderSize(@ReadableBytes int maxHeaderSize) {
+        this.maxHeaderSize = maxHeaderSize;
+    }
+
+    /**
      * <p>The proxy to use. For authentication specify http.proxyUser and http.proxyPassword system properties.</p>
      *
      * <p>Alternatively configure a {@code java.net.ProxySelector}</p>
@@ -873,6 +939,28 @@ public abstract class HttpClientConfiguration {
     }
 
     /**
+     * The path pattern to use for logging outgoing connections to pcap. This is an unsupported option: Behavior may
+     * change, or it may disappear entirely, without notice! Only implemented for netty.
+     *
+     * @return The path pattern, or {@code null} if logging is disabled.
+     */
+    @Internal
+    public String getPcapLoggingPathPattern() {
+        return pcapLoggingPathPattern;
+    }
+
+    /**
+     * The path pattern to use for logging outgoing connections to pcap. This is an unsupported option: Behavior may
+     * change, or it may disappear entirely, without notice! Only implemented for netty.
+     *
+     * @param pcapLoggingPathPattern The path pattern, or {@code null} to disable logging.
+     */
+    @Internal
+    public void setPcapLoggingPathPattern(String pcapLoggingPathPattern) {
+        this.pcapLoggingPathPattern = pcapLoggingPathPattern;
+    }
+
+    /**
      * Configuration for the HTTP client connnection pool.
      */
     public static class ConnectionPoolConfiguration implements Toggleable {
@@ -890,7 +978,7 @@ public abstract class HttpClientConfiguration {
         private int maxPendingConnections = 4;
 
         private int maxConcurrentRequestsPerHttp2Connection = Integer.MAX_VALUE;
-        private int maxConcurrentHttp1Connections = Integer.MAX_VALUE;
+        private int maxConcurrentHttp1Connections = 1000;
         private int maxConcurrentHttp2Connections = 1;
 
         private int maxPendingAcquires = Integer.MAX_VALUE;
@@ -898,6 +986,12 @@ public abstract class HttpClientConfiguration {
         private Duration acquireTimeout;
 
         private boolean enabled = DEFAULT_ENABLED;
+
+        @NonNull
+        private HttpClientConfiguration.ConnectionPoolConfiguration.ConnectionLocality connectionLocality = ConnectionLocality.PREFERRED;
+
+        @NonNull
+        private PoolVersion version = PoolVersion.V4_9;
 
         /**
          * Whether connection pooling is enabled.
@@ -1036,6 +1130,97 @@ public abstract class HttpClientConfiguration {
          */
         public void setMaxConcurrentHttp2Connections(int maxConcurrentHttp2Connections) {
             this.maxConcurrentHttp2Connections = maxConcurrentHttp2Connections;
+        }
+
+        /**
+         * Optimize locality of client connections depending on which event loop makes a request.
+         * [available in the Netty HTTP client]
+         *
+         * @return The locality configuration
+         * @since 4.8.0
+         */
+        public @NonNull HttpClientConfiguration.ConnectionPoolConfiguration.ConnectionLocality getConnectionLocality() {
+            return connectionLocality;
+        }
+
+        /**
+         * Optimize locality of client connections depending on which event loop makes a request.
+         * [available in the Netty HTTP client]
+         *
+         * @param connectionLocality The locality configuration
+         * @since 4.8.0
+         */
+        public void setConnectionLocality(@NonNull HttpClientConfiguration.ConnectionPoolConfiguration.ConnectionLocality connectionLocality) {
+            this.connectionLocality = connectionLocality;
+        }
+
+        /**
+         * The version of the connection pool implementation. Defaults to {@code V4_9}, can be set
+         * to {@code V4_0} for compatibility.
+         *
+         * @return The pool version
+         */
+        public @NonNull PoolVersion getVersion() {
+            return version;
+        }
+
+        /**
+         * The version of the connection pool implementation. Defaults to {@code V4_9}, can be set
+         * to {@code V4_0} for compatibility.
+         *
+         * @param version The pool version
+         */
+        public void setVersion(@NonNull PoolVersion version) {
+            this.version = version;
+        }
+
+        /**
+         * Options for {@link #connectionLocality}.
+         *
+         * @since 4.8.0
+         */
+        public enum ConnectionLocality {
+            /**
+             * Do not consider locality when selecting a connection.
+             */
+            IGNORE,
+            /**
+             * If a request is made from an event loop, and a connection is already in the pool
+             * from that same event loop, prefer using that connection. When a new connection needs
+             * to be created, also prefer the current event loop.
+             */
+            PREFERRED,
+            /**
+             * If a request is made from an event loop, and a connection is already in the pool
+             * from that same event loop, use that connection. Otherwise, force creating a new
+             * connection on the same event loop. Please ensure that settings such as
+             * {@link #maxPendingConnections} are also high enough to create new connections.
+             */
+            ENFORCED_IF_SAME_GROUP,
+            /**
+             * Same as {@link #ENFORCED_IF_SAME_GROUP}, but if a request is made from outside the
+             * event loop group of the client, fail <i>a</i> request. Note that there is no
+             * guarantee that the offending request is the only request seeing a failure, so the
+             * exception should only be used as a warning that you are using the client in a way
+             * that you did not intend.
+             */
+            ENFORCED_ALWAYS,
+        }
+
+        /**
+         * Different pool implementation versions, for compatibility.
+         *
+         * @since 4.9.0
+         */
+        public enum PoolVersion {
+            /**
+             * The connection pool introduced in micronaut-core 4.0.0.
+             */
+            V4_0,
+            /**
+             * The connection pool introduced in micronaut-core 4.9.0.
+             */
+            V4_9
         }
     }
 

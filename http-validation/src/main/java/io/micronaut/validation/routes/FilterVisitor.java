@@ -37,8 +37,10 @@ import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.Element;
 import io.micronaut.inject.ast.MethodElement;
 import io.micronaut.inject.ast.ParameterElement;
+import io.micronaut.inject.visitor.TypeElementQuery;
 import io.micronaut.inject.visitor.TypeElementVisitor;
 import io.micronaut.inject.visitor.VisitorContext;
+import io.micronaut.web.router.RouteInfo;
 import io.micronaut.web.router.RouteMatch;
 import org.reactivestreams.Publisher;
 
@@ -60,7 +62,8 @@ public final class FilterVisitor implements TypeElementVisitor<Object, Object> {
         Optional.class,
         Throwable.class,
         MutablePropagatedContext.class,
-        RouteMatch.class
+        RouteMatch.class,
+        RouteInfo.class
     );
     private static final Set<String> PERMITTED_BINDING_ANNOTATIONS = Set.of(
         Body.class.getName(),
@@ -82,6 +85,11 @@ public final class FilterVisitor implements TypeElementVisitor<Object, Object> {
             RequestFilter.class.getName(),
             ResponseFilter.class.getName()
         );
+    }
+
+    @Override
+    public TypeElementQuery query() {
+        return TypeElementQuery.onlyMethods();
     }
 
     @Override

@@ -15,7 +15,10 @@
  */
 package io.micronaut.core.execution;
 
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
+
+import java.util.concurrent.CompletionException;
 
 /**
  * {@link ExecutionFlow} that can be completed similar to a
@@ -41,4 +44,62 @@ public sealed interface DelayedExecutionFlow<T> extends ExecutionFlow<T> permits
      * @param exc The exception
      */
     void completeExceptionally(Throwable exc);
+
+    /**
+     * Complete this flow normally.
+     *
+     * @param result The result value
+     * @return {@code false} if this flow has already been completed
+     */
+    boolean tryComplete(@Nullable T result);
+
+    /**
+     * Complete this flow with an exception.
+     *
+     * @param exc The exception
+     * @return {@code false} if this flow has already been completed
+     */
+    boolean tryCompleteExceptionally(Throwable exc);
+
+    /**
+     * Check for cancellation.
+     *
+     * @return {@code true} iff this flow or any downstream flow has been cancelled
+     * @since 4.8.0
+     */
+    boolean isCancelled();
+
+    /**
+     * Add a listener that is called if this flow or any downstream flow is cancelled.
+     *
+     * @param hook The hook to call on cancellation
+     * @since 4.8.0
+     */
+    void onCancel(@NonNull Runnable hook);
+
+    /**
+     * Complete this flow from the given flow.
+     *
+     * @param flow The input flow
+     * @since 4.7.0
+     */
+    void completeFrom(@NonNull ExecutionFlow<T> flow);
+
+    /**
+     * Complete the flow with value / exception.
+     *
+     * @param value     The value
+     * @param throwable The exception
+     * @since 4.7.0
+     */
+    default void complete(T value, Throwable throwable) {
+        if (throwable != null) {
+            if (throwable instanceof CompletionException completionException) {
+                throwable = completionException.getCause();
+            }
+            completeExceptionally(throwable);
+        } else {
+            complete(value);
+        }
+    }
 }

@@ -21,7 +21,6 @@ import io.micronaut.core.order.OrderUtil;
 import io.micronaut.core.reflect.ClassUtils;
 import io.micronaut.core.util.CollectionUtils;
 import io.micronaut.core.util.SupplierUtil;
-import io.micronaut.http.HttpAttributes;
 import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpStatus;
@@ -270,8 +269,10 @@ public class DefaultRouter implements Router, HttpServerFilterResolver<RouteMatc
                 uriRoutes.add(match);
             }
         }
-        if (routes.size() == 1) {
-            return uriRoutes.get(0);
+        if (uriRoutes.size() == 1) {
+            Object obj = uriRoutes.get(0);
+            // type pollution avoidance (should be covered by type pollution test)
+            return obj instanceof DefaultUriRouteMatch<?, ?> def ? (DefaultUriRouteMatch<T, R>) def : (UriRouteMatch<T, R>) obj;
         }
         uriRoutes = resolveAmbiguity(request, uriRoutes);
         if (uriRoutes.size() > 1) {
@@ -290,11 +291,10 @@ public class DefaultRouter implements Router, HttpServerFilterResolver<RouteMatc
             return Collections.emptyList();
         }
         List<UriRouteMatch<T, R>> uriRoutes = toMatches(request.getPath(), routes);
-        if (routes.size() == 1) {
+        if (uriRoutes.size() == 1) {
             return uriRoutes;
         }
-        uriRoutes = resolveAmbiguity(request, uriRoutes);
-        return uriRoutes;
+        return resolveAmbiguity(request, uriRoutes);
     }
 
     private <T, R> List<UriRouteMatch<T, R>> resolveAmbiguity(HttpRequest<?> request,
@@ -593,9 +593,7 @@ public class DefaultRouter implements Router, HttpServerFilterResolver<RouteMatc
         }
         var httpFilters = new ArrayList<GenericHttpFilter>(alwaysMatchesFilterRoutes.size() + preconditionFilterRoutes.size());
         httpFilters.addAll(alwaysMatchesHttpFilters.get());
-        var routeMatch = (RouteMatch) request.getAttribute(HttpAttributes.ROUTE_MATCH)
-            .filter(o -> o instanceof RouteMatch)
-            .orElse(null);
+        var routeMatch = RouteAttributes.getRouteMatch(request).orElse(null);
         HttpMethod method = request.getMethod();
         String path = request.getPath();
         for (FilterRoute filterRoute : preconditionFilterRoutes) {
@@ -801,7 +799,7 @@ public class DefaultRouter implements Router, HttpServerFilterResolver<RouteMatc
                 filterEntries.add(filterRoute);
             }
         }
-        filterEntries.sort(OrderUtil.COMPARATOR);
+        filterEntries.sort(OrderUtil.COMPARATOR_ZERO);
         return Collections.unmodifiableList(filterEntries);
     }
 
@@ -831,7 +829,7 @@ public class DefaultRouter implements Router, HttpServerFilterResolver<RouteMatc
             }
             httpFilters.add(entry.getFilter());
         }
-        httpFilters.sort(OrderUtil.COMPARATOR);
+        httpFilters.sort(OrderUtil.COMPARATOR_ZERO);
         return Collections.unmodifiableList(httpFilters);
     }
 

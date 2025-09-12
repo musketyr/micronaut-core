@@ -43,6 +43,7 @@ import io.micronaut.core.naming.conventions.StringConvention;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.core.util.StringUtils;
+import io.micronaut.core.value.PropertyCatalog;
 import io.micronaut.inject.BeanConfiguration;
 import io.micronaut.inject.BeanDefinition;
 import io.micronaut.inject.BeanDefinitionReference;
@@ -142,6 +143,15 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
         configuration.getContextConfigurer().ifPresent(configurer ->
             configurer.configure(this)
         );
+        if (traceMode != BeanResolutionTraceMode.NONE) {
+            traceMode.getTracer().ifPresent(tracer -> {
+                tracer.traceInitialConfiguration(
+                    this.environment,
+                    this.getBeanDefinitionReferences(),
+                    this.getDisabledBeans()
+                );
+            });
+        }
     }
 
     @Override
@@ -251,6 +261,12 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
     @Override
     public Collection<String> getPropertyEntries(@NonNull String name) {
         return getEnvironment().getPropertyEntries(name);
+    }
+
+    @NonNull
+    @Override
+    public Collection<String> getPropertyEntries(@NonNull String name, @NonNull PropertyCatalog propertyCatalog) {
+        return getEnvironment().getPropertyEntries(name, propertyCatalog);
     }
 
     @NonNull
@@ -459,12 +475,15 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
     }
 
     @Override
-    protected <T> void collectIterableBeans(BeanResolutionContext resolutionContext, BeanDefinition<T> iterableBean, Set<BeanDefinition<T>> targetSet) {
+    protected <T> void collectIterableBeans(@Nullable BeanResolutionContext resolutionContext,
+                                            @NonNull BeanDefinition<T> iterableBean,
+                                            @NonNull Set<BeanDefinition<T>> targetSet,
+                                            @NonNull Argument<T> beanType) {
         try (BeanResolutionContext rc = newResolutionContext(iterableBean, resolutionContext)) {
             if (iterableBean.hasDeclaredStereotype(EachProperty.class)) {
                 transformEachPropertyBeanDefinition(rc, iterableBean, targetSet);
             } else if (iterableBean.hasDeclaredStereotype(EachBean.class)) {
-                transformEachBeanBeanDefinition(rc, iterableBean, targetSet);
+                transformEachBeanBeanDefinition(rc, iterableBean, targetSet, beanType);
             } else {
                 transformConfigurationReaderBeanDefinition(rc, iterableBean, targetSet);
             }
@@ -544,7 +563,8 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
 
     private <T> void transformEachBeanBeanDefinition(@NonNull BeanResolutionContext resolutionContext,
                                                      BeanDefinition<T> originBeanDefinition,
-                                                     Set<BeanDefinition<T>> transformedCandidates) {
+                                                     Set<BeanDefinition<T>> transformedCandidates,
+                                                     @NonNull Argument<T> beanType) {
         AnnotationValue<EachBean> annotationValue = originBeanDefinition.getAnnotation(EachBean.class);
         if (annotationValue == null) {
             transformedCandidates.add(originBeanDefinition);
@@ -591,7 +611,7 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
                         delegateTypeArguments = typeArguments;
                     }
                     BeanDefinitionDelegate<?> delegate = BeanDefinitionDelegate.create(originBeanDefinition, (Qualifier<T>) qualifier, delegateTypeArguments);
-                    if (delegate.isEnabled(this, resolutionContext)) {
+                    if (delegate.isEnabled(this, resolutionContext) && delegate.isCandidateBean(beanType)) {
                         transformedCandidates.add((BeanDefinition<T>) delegate);
                     }
                 }
@@ -600,8 +620,8 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
     }
 
     private <T> void transformEachPropertyBeanDefinition(@NonNull BeanResolutionContext resolutionContext,
-                                                         BeanDefinition<T> candidate,
-                                                         Set<BeanDefinition<T>> transformedCandidates) {
+                                                         @NonNull BeanDefinition<T> candidate,
+                                                         @NonNull Set<BeanDefinition<T>> transformedCandidates) {
         try {
             final String prefix = candidate.stringValue(ConfigurationReader.class, ConfigurationReader.PREFIX).orElse(null);
             if (prefix != null) {
@@ -812,6 +832,12 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
                 public ClassPathResourceLoader getResourceLoader() {
                     return resourceLoader;
                 }
+
+                @Nullable
+                @Override
+                public List<String> getOverrideConfigLocations() {
+                    return configuration.getOverrideConfigLocations();
+                }
             });
         }
 
@@ -939,6 +965,7 @@ public class DefaultApplicationContext extends DefaultBeanContext implements Con
         public Environment stop() {
             if (bootstrapEnvironment != null) {
                 bootstrapEnvironment.stop();
+                bootstrapEnvironment = null;
             }
             return super.stop();
         }

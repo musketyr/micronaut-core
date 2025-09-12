@@ -15,16 +15,17 @@
  */
 package io.micronaut.http.server.netty.multipart;
 
+import io.micronaut.buffer.netty.NettyReadBufferFactory;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.async.publisher.AsyncSingleResultPublisher;
 import io.micronaut.core.naming.NameUtils;
 import io.micronaut.core.util.functional.ThrowingSupplier;
 import io.micronaut.http.MediaType;
+import io.micronaut.http.body.stream.PublisherAsBlocking;
+import io.micronaut.http.body.stream.PublisherAsStream;
 import io.micronaut.http.multipart.MultipartException;
 import io.micronaut.http.multipart.PartData;
 import io.micronaut.http.multipart.StreamingFileUpload;
-import io.micronaut.http.netty.PublisherAsBlocking;
-import io.micronaut.http.netty.PublisherAsStream;
 import io.micronaut.http.server.HttpServerConfiguration;
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.http.multipart.DiskFileUpload;
@@ -44,6 +45,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * An implementation of the {@link StreamingFileUpload} interface for Netty.
@@ -55,7 +57,8 @@ import java.util.concurrent.ExecutorService;
 public final class NettyStreamingFileUpload implements StreamingFileUpload {
 
     private static final Logger LOG = LoggerFactory.getLogger(NettyStreamingFileUpload.class);
-    private io.netty.handler.codec.http.multipart.FileUpload fileUpload;
+    private final io.netty.handler.codec.http.multipart.FileUpload fileUpload;
+    private final AtomicBoolean released = new AtomicBoolean(false);
     private final ExecutorService ioExecutor;
     private final HttpServerConfiguration.MultipartConfiguration configuration;
     private final Flux<PartData> subject;
@@ -69,7 +72,7 @@ public final class NettyStreamingFileUpload implements StreamingFileUpload {
         this.configuration = multipartConfiguration;
         this.fileUpload = httpData;
         this.ioExecutor = ioExecutor;
-        this.subject = subject;
+        this.subject = subject.doOnTerminate(this::discard);
     }
 
     @Override
@@ -129,8 +132,11 @@ public final class NettyStreamingFileUpload implements StreamingFileUpload {
 
     @Override
     public InputStream asInputStream() {
-        PublisherAsBlocking<ByteBuf> publisherAsBlocking = new PublisherAsBlocking<>();
-        subject.map(pd -> ((NettyPartData) pd).getByteBuf()).subscribe(publisherAsBlocking);
+        PublisherAsBlocking publisherAsBlocking = new PublisherAsBlocking();
+        subject.map(pd -> {
+            ByteBuf byteBuf = ((NettyPartData) pd).getByteBuf();
+            return NettyReadBufferFactory.of(byteBuf.alloc()).adapt(byteBuf);
+        }).subscribe(publisherAsBlocking);
         return new PublisherAsStream(publisherAsBlocking);
     }
 
@@ -138,7 +144,7 @@ public final class NettyStreamingFileUpload implements StreamingFileUpload {
      * @param location The location for the temp file
      * @return The temporal file
      */
-    protected File createTemp(String location) {
+    private File createTemp(String location) {
         try {
             return Files.createTempFile(DiskFileUpload.prefix, DiskFileUpload.postfix + '_' + location).toFile();
         } catch (IOException e) {
@@ -153,16 +159,19 @@ public final class NettyStreamingFileUpload implements StreamingFileUpload {
 
     @Override
     public void discard() {
-        fileUpload.release();
+        if (released.compareAndSet(false, true)) {
+            fileUpload.release();
+        }
     }
 
     private Publisher<Boolean> transferTo(ThrowingSupplier<OutputStream, IOException> outputStreamSupplier) {
         return Mono.<Boolean>create(emitter ->
 
                 subject.publishOn(Schedulers.fromExecutorService(ioExecutor))
-                        .subscribe(new Subscriber<PartData>() {
+                        .subscribe(new Subscriber<>() {
                             Subscription subscription;
                             OutputStream outputStream;
+
                             @Override
                             public void onSubscribe(Subscription s) {
                                 subscription = s;

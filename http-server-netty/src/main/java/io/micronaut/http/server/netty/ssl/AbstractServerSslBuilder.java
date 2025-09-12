@@ -26,15 +26,15 @@ import io.micronaut.http.ssl.SslBuilder;
 import io.micronaut.http.ssl.SslConfiguration;
 import io.micronaut.http.ssl.SslConfigurationException;
 import io.netty.handler.codec.http2.Http2SecurityUtil;
+import io.netty.handler.codec.http3.Http3;
+import io.netty.handler.codec.quic.QuicSslContext;
+import io.netty.handler.codec.quic.QuicSslContextBuilder;
 import io.netty.handler.ssl.ApplicationProtocolConfig;
 import io.netty.handler.ssl.ApplicationProtocolNames;
 import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SupportedCipherSuiteFilter;
-import io.netty.incubator.codec.http3.Http3;
-import io.netty.incubator.codec.quic.QuicSslContext;
-import io.netty.incubator.codec.quic.QuicSslContextBuilder;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLException;
@@ -158,7 +158,9 @@ public abstract class AbstractServerSslBuilder extends SslBuilder<SslContext> im
     @Override
     protected KeyManagerFactory getKeyManagerFactory(SslConfiguration ssl) {
         try {
-            return NettyTlsUtils.storeToFactory(ssl, getKeyStore(ssl).orElse(null));
+            return NettyTlsUtils.storeToFactory(ssl, getKeyStore(ssl).orElseThrow(() -> new SslConfigurationException("No key store configured")));
+        } catch (SslConfigurationException ex) {
+            throw ex;
         } catch (Exception ex) {
             throw new SslConfigurationException(ex);
         }

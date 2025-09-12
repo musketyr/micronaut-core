@@ -15,6 +15,7 @@
  */
 package io.micronaut.kotlin.processing
 
+import com.google.devtools.ksp.getDeclaredFunctions
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSClassDeclaration
@@ -30,7 +31,7 @@ import io.micronaut.kotlin.processing.visitor.KotlinMethodNativeElement
  * @author Denis Stepanov
  * @since 4.3.0
  */
-internal class KotlinNativeElementsHelper(private val resolver: Resolver) : NativeElementsHelper<KSClassDeclaration, KSFunctionDeclaration>() {
+internal class KotlinNativeElementsHelper(var resolver: Resolver) : NativeElementsHelper<KSClassDeclaration, KSFunctionDeclaration>() {
 
     override fun getClassCacheKey(classElement: KSClassDeclaration): Any {
         return KotlinClassNativeElement(classElement, null, null)
@@ -89,7 +90,7 @@ internal class KotlinNativeElementsHelper(private val resolver: Resolver) : Nati
     }
 
     override fun getMethods(classNode: KSClassDeclaration): MutableList<KSFunctionDeclaration> {
-        return classNode.getAllFunctions().toMutableList()
+        return classNode.getDeclaredFunctions().toMutableList()
     }
 
     override fun excludeClass(classNode: KSClassDeclaration): Boolean {

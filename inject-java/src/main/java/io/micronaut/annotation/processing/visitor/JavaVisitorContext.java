@@ -38,8 +38,8 @@ import io.micronaut.inject.ast.annotation.AbstractAnnotationElement;
 import io.micronaut.inject.ast.annotation.ElementAnnotationMetadataFactory;
 import io.micronaut.inject.ast.beans.BeanElement;
 import io.micronaut.inject.ast.beans.BeanElementBuilder;
-import io.micronaut.inject.configuration.ConfigurationMetadataBuilder;
 import io.micronaut.inject.visitor.BeanElementVisitorContext;
+import io.micronaut.inject.visitor.ElementPostponedToNextRoundException;
 import io.micronaut.inject.visitor.TypeElementVisitor;
 import io.micronaut.inject.visitor.VisitorContext;
 import io.micronaut.inject.visitor.util.VisitorContextUtils;
@@ -66,6 +66,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -100,6 +101,8 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
     private final JavaElementAnnotationMetadataFactory elementAnnotationMetadataFactory;
     private final JavaNativeElementsHelper nativeElementsHelper;
     private final Filer filer;
+    private final Set<String> postponedTypes;
+    private boolean visitUnresolvedInterfaces;
 
     /**
      * The default constructor.
@@ -128,7 +131,7 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         Filer filer,
         MutableConvertibleValues<Object> visitorAttributes,
         TypeElementVisitor.VisitorKind visitorKind) {
-        this(processingEnv, messager, elements, types, modelUtils, filer, visitorAttributes, visitorKind);
+        this(processingEnv, messager, elements, types, modelUtils, filer, visitorAttributes, visitorKind, new HashSet<>());
     }
 
     /**
@@ -142,7 +145,9 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
      * @param filer The filer
      * @param visitorAttributes The attributes
      * @param visitorKind The visitor kind
+     * @deprecated No longer needed
      */
+    @Deprecated(forRemoval = true, since = "4.7.0")
     public JavaVisitorContext(
         ProcessingEnvironment processingEnv,
         Messager messager,
@@ -152,6 +157,32 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         Filer filer,
         MutableConvertibleValues<Object> visitorAttributes,
         TypeElementVisitor.VisitorKind visitorKind) {
+        this(processingEnv, messager, elements, types, modelUtils, filer, visitorAttributes, visitorKind, Set.of());
+    }
+
+    /**
+     * The default constructor.
+     *
+     * @param processingEnv The processing environment
+     * @param messager The messager
+     * @param elements The elements
+     * @param types Type types
+     * @param modelUtils The model utils
+     * @param filer The filer
+     * @param visitorAttributes The attributes
+     * @param visitorKind The visitor kind
+     * @param postponedTypes The postponed types
+     */
+    public JavaVisitorContext(
+        ProcessingEnvironment processingEnv,
+        Messager messager,
+        Elements elements,
+        Types types,
+        ModelUtils modelUtils,
+        Filer filer,
+        MutableConvertibleValues<Object> visitorAttributes,
+        TypeElementVisitor.VisitorKind visitorKind,
+        Set<String> postponedTypes) {
         this.messager = messager;
         this.elements = elements;
         this.types = types;
@@ -166,6 +197,7 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         this.elementAnnotationMetadataFactory = new JavaElementAnnotationMetadataFactory(false, this.annotationMetadataBuilder);
         this.expressionCompilationContextFactory = new DefaultExpressionCompilationContextFactory(this);
         this.filer = filer;
+        this.postponedTypes = postponedTypes;
     }
 
     @Override
@@ -185,6 +217,22 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
      */
     public ProcessingEnvironment getProcessingEnv() {
         return processingEnv;
+    }
+
+    /**
+     * @return True if the unresolved interfaces should be visited
+     * @since 4.9
+     */
+    public boolean isVisitUnresolvedInterfaces() {
+        return visitUnresolvedInterfaces;
+    }
+
+    /**
+     * @param visitUnresolvedInterfaces True to visit unresolved interfaces
+     * @since 4.9
+     */
+    public void setVisitUnresolvedInterfaces(boolean visitUnresolvedInterfaces) {
+        this.visitUnresolvedInterfaces = visitUnresolvedInterfaces;
     }
 
     @NonNull
@@ -232,14 +280,12 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
     }
 
     @Override
-    public @NonNull
-    ClassElement[] getClassElements(@NonNull String aPackage, @NonNull String... stereotypes) {
+    public @NonNull ClassElement[] getClassElements(@NonNull String aPackage, @NonNull String... stereotypes) {
         ArgumentUtils.requireNonNull("aPackage", aPackage);
         ArgumentUtils.requireNonNull("stereotypes", stereotypes);
         final PackageElement packageElement = elements.getPackageElement(aPackage);
         if (packageElement != null) {
             var classElements = new ArrayList<ClassElement>();
-
             populateClassElements(stereotypes, packageElement, classElements);
             return classElements.toArray(ClassElement.ZERO_CLASS_ELEMENTS);
         }
@@ -321,13 +367,29 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         }
     }
 
+    private void checkForPostponedOriginalElement(io.micronaut.inject.ast.Element originatingElement) {
+        if (originatingElement != null && postponedTypes.contains(originatingElement.getName())) {
+            throw new ElementPostponedToNextRoundException(originatingElement);
+        }
+    }
+
+    private void checkForPostponedOriginalElements(io.micronaut.inject.ast.Element[] originatingElements) {
+        if (originatingElements != null) {
+            for (io.micronaut.inject.ast.Element originatingElement : originatingElements) {
+                checkForPostponedOriginalElement(originatingElement);
+            }
+        }
+    }
+
     @Override
     public OutputStream visitClass(String classname, @Nullable io.micronaut.inject.ast.Element originatingElement) throws IOException {
+        checkForPostponedOriginalElement(originatingElement);
         return outputVisitor.visitClass(classname, new io.micronaut.inject.ast.Element[] {originatingElement});
     }
 
     @Override
     public OutputStream visitClass(String classname, io.micronaut.inject.ast.Element... originatingElements) throws IOException {
+        checkForPostponedOriginalElements(originatingElements);
         return outputVisitor.visitClass(classname, originatingElements);
     }
 
@@ -338,11 +400,13 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
 
     @Override
     public void visitServiceDescriptor(String type, String classname, io.micronaut.inject.ast.Element originatingElement) {
+        checkForPostponedOriginalElement(originatingElement);
         outputVisitor.visitServiceDescriptor(type, classname, originatingElement);
     }
 
     @Override
     public Optional<GeneratedFile> visitMetaInfFile(String path, io.micronaut.inject.ast.Element... originatingElements) {
+        checkForPostponedOriginalElements(originatingElements);
         return outputVisitor.visitMetaInfFile(path, originatingElements);
     }
 
@@ -353,11 +417,13 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
 
     @Override
     public Optional<GeneratedFile> visitGeneratedFile(String path, io.micronaut.inject.ast.Element... originatingElements) {
+        checkForPostponedOriginalElements(originatingElements);
         return outputVisitor.visitGeneratedFile(path, originatingElements);
     }
 
     @Override
     public Optional<GeneratedFile> visitGeneratedSourceFile(String packageName, String fileNameWithoutExtension, io.micronaut.inject.ast.Element... originatingElements) {
+        checkForPostponedOriginalElements(originatingElements);
         return outputVisitor.visitGeneratedSourceFile(packageName, fileNameWithoutExtension, originatingElements);
     }
 
@@ -489,11 +555,11 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         final List<? extends Element> enclosedElements = packageElement.getEnclosedElements();
         boolean includeAll = Arrays.equals(stereotypes, new String[] {"*"});
         for (Element enclosedElement : enclosedElements) {
-            populateClassElements(stereotypes, includeAll, packageElement, enclosedElement, classElements);
+            populateClassElements(stereotypes, includeAll, enclosedElement, classElements);
         }
     }
 
-    private void populateClassElements(@NonNull String[] stereotypes, boolean includeAll, PackageElement packageElement, Element enclosedElement, List<ClassElement> classElements) {
+    private void populateClassElements(@NonNull String[] stereotypes, boolean includeAll, Element enclosedElement, List<ClassElement> classElements) {
         if (enclosedElement instanceof TypeElement element) {
             JavaClassElement classElement = elementFactory.newClassElement(element, elementAnnotationMetadataFactory);
             if ((includeAll || Arrays.stream(stereotypes).anyMatch(classElement::hasStereotype)) && !classElement.isAbstract()) {
@@ -501,7 +567,7 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
             }
             List<? extends Element> nestedElements = enclosedElement.getEnclosedElements();
             for (Element nestedElement : nestedElements) {
-                populateClassElements(stereotypes, includeAll, packageElement, nestedElement, classElements);
+                populateClassElements(stereotypes, includeAll, nestedElement, classElements);
             }
         } else if (enclosedElement instanceof PackageElement element) {
             populateClassElements(stereotypes, element, classElements);
@@ -564,7 +630,6 @@ public final class JavaVisitorContext implements VisitorContext, BeanElementVisi
         return new JavaBeanDefinitionBuilder(
             originatingElement,
             type,
-            ConfigurationMetadataBuilder.INSTANCE,
             type instanceof AbstractAnnotationElement aae ? aae.getElementAnnotationMetadataFactory() : elementAnnotationMetadataFactory,
             this
         );

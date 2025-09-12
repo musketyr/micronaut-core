@@ -18,18 +18,25 @@ package io.micronaut.json.body;
 import io.micronaut.context.annotation.BootstrapContextCompatible;
 import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Order;
 import io.micronaut.core.io.buffer.ByteBuffer;
 import io.micronaut.core.io.buffer.ReferenceCounted;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.type.Headers;
 import io.micronaut.core.type.MutableHeaders;
 import io.micronaut.http.HttpHeaders;
+import io.micronaut.http.HttpRequest;
+import io.micronaut.http.HttpResponse;
 import io.micronaut.http.MediaType;
 import io.micronaut.http.annotation.Consumes;
 import io.micronaut.http.annotation.Produces;
+import io.micronaut.http.body.ByteBodyFactory;
+import io.micronaut.http.body.CloseableByteBody;
 import io.micronaut.http.body.MessageBodyHandler;
 import io.micronaut.http.body.MessageBodyWriter;
+import io.micronaut.http.body.ResponseBodyWriter;
 import io.micronaut.http.codec.CodecException;
+import io.micronaut.json.JsonFeatures;
 import io.micronaut.json.JsonMapper;
 import jakarta.inject.Singleton;
 
@@ -52,12 +59,18 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * @author Jonas Konrad
  * @since 4.0.0
  */
+@Order(JsonMessageHandler.ORDER)
 @Experimental
 @Singleton
 @JsonMessageHandler.ProducesJson
 @JsonMessageHandler.ConsumesJson
 @BootstrapContextCompatible
-public final class JsonMessageHandler<T> implements MessageBodyHandler<T> {
+public final class JsonMessageHandler<T> implements MessageBodyHandler<T>, CustomizableJsonHandler, ResponseBodyWriter<T> {
+
+    /**
+     * The JSON handler should be preferred if for any type.
+     */
+    public static final int ORDER = -10;
 
     private final JsonMapper jsonMapper;
 
@@ -77,7 +90,7 @@ public final class JsonMessageHandler<T> implements MessageBodyHandler<T> {
 
     @Override
     public boolean isReadable(@NonNull Argument<T> type, MediaType mediaType) {
-        return mediaType != null && mediaType.getExtension().equals(MediaType.EXTENSION_JSON);
+        return mediaType != null && mediaType.matchesAllOrWildcardOrExtension(MediaType.EXTENSION_JSON);
     }
 
     private static CodecException decorateRead(Argument<?> type, IOException e) {
@@ -114,7 +127,7 @@ public final class JsonMessageHandler<T> implements MessageBodyHandler<T> {
 
     @Override
     public boolean isWriteable(@NonNull Argument<T> type, MediaType mediaType) {
-        return mediaType != null && mediaType.getExtension().equals(MediaType.EXTENSION_JSON);
+        return mediaType != null && mediaType.matchesAllOrWildcardOrExtension(MediaType.EXTENSION_JSON);
     }
 
     private static CodecException decorateWrite(Object object, IOException e) {
@@ -133,6 +146,20 @@ public final class JsonMessageHandler<T> implements MessageBodyHandler<T> {
         } catch (IOException e) {
             throw decorateWrite(object, e);
         }
+    }
+
+    @Override
+    public @NonNull CloseableByteBody writePiece(@NonNull ByteBodyFactory bodyFactory, @NonNull HttpRequest<?> request, @NonNull HttpResponse<?> response, @NonNull Argument<T> type, @NonNull MediaType mediaType, T object) throws CodecException {
+        try {
+            return bodyFactory.buffer(s -> jsonMapper.writeValue(s, object));
+        } catch (IOException e) {
+            throw new CodecException("Error encoding object [" + object + "] to JSON: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public CustomizableJsonHandler customize(JsonFeatures jsonFeatures) {
+        return new JsonMessageHandler<>(jsonMapper.cloneWithFeatures(jsonFeatures));
     }
 
     /**

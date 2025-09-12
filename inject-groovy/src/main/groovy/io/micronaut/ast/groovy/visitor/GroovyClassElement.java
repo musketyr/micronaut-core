@@ -62,7 +62,6 @@ import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.PackageNode;
 import org.codehaus.groovy.ast.PropertyNode;
 import org.codehaus.groovy.ast.stmt.BlockStatement;
-import org.objectweb.asm.Opcodes;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
@@ -99,6 +98,8 @@ import java.util.stream.StreamSupport;
 @Internal
 public class GroovyClassElement extends AbstractGroovyElement implements ArrayableClassElement {
 
+    private static final int ACC_SYNTHETIC = 0x1000; // class, field, method, parameter, module *
+
     private static final Predicate<MethodNode> JUNK_METHOD_FILTER = m -> {
         String methodName = m.getName();
 
@@ -134,6 +135,7 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
     private final GroovyEnclosedElementsQuery groovySourceEnclosedElementsQuery = new GroovyEnclosedElementsQuery(true);
     @Nullable
     private AnnotationMetadata annotationMetadata;
+    private List<PropertyNode> propertyElements;
 
     /**
      * @param visitorContext The visitor context
@@ -251,6 +253,11 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
     @Override
     public boolean isTypeVariable() {
         return isTypeVar;
+    }
+
+    @Override
+    public boolean isRecord() {
+        return classNode.isRecord();
     }
 
     @Override
@@ -389,7 +396,20 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
 
     @Override
     public @NonNull List<PropertyElement> getBeanProperties(@NonNull PropertyElementQuery propertyElementQuery) {
-        Set<String> nativeProps = getPropertyNodes().stream().map(PropertyNode::getName).collect(Collectors.toCollection(LinkedHashSet::new));
+        if (isRecord()) {
+            return AstBeanPropertiesUtils.resolveBeanProperties(propertyElementQuery,
+                this,
+                this::getRecordMethods,
+                this::getRecordFields,
+                true,
+                Collections.emptySet(),
+                methodElement -> Optional.empty(),
+                methodElement -> Optional.empty(),
+                this::mapToPropertyElement);
+        }
+        Set<String> nativeProps = getPropertyNodes().stream()
+            .map(PropertyNode::getName)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
         return AstBeanPropertiesUtils.resolveBeanProperties(propertyElementQuery,
             this,
             () -> getEnclosedElements(ElementQuery.ALL_METHODS.onlyInstance()),
@@ -407,6 +427,54 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
             properties = getBeanProperties(PropertyElementQuery.of(this));
         }
         return properties;
+    }
+
+    private GroovyPropertyElement mapToPropertyElement(AstBeanPropertiesUtils.BeanPropertyData value) {
+        return new GroovyPropertyElement(
+            visitorContext,
+            GroovyClassElement.this,
+            value.type,
+            value.readAccessKind == null ? null : value.getter,
+            value.writeAccessKind == null ? null : value.setter,
+            value.field,
+            elementAnnotationMetadataFactory,
+            value.propertyName,
+            value.readAccessKind == null ? PropertyElement.AccessKind.METHOD : PropertyElement.AccessKind.valueOf(value.readAccessKind.name()),
+            value.writeAccessKind == null ? PropertyElement.AccessKind.METHOD : PropertyElement.AccessKind.valueOf(value.writeAccessKind.name()),
+            value.isExcluded
+        );
+    }
+
+    private List<MethodElement> getRecordMethods() {
+        var methodElements = new ArrayList<MethodElement>();
+        for (var recordComponentNode : classNode.getRecordComponents()) {
+            var method = classNode.getMethods(recordComponentNode.getName()).get(0);
+            methodElements.add(
+                new GroovyMethodElement(
+                    GroovyClassElement.this,
+                    visitorContext,
+                    new GroovyNativeElement.Method(method),
+                    method,
+                    elementAnnotationMetadataFactory
+                )
+            );
+        }
+        return methodElements;
+    }
+
+    private List<FieldElement> getRecordFields() {
+        var fieldElements = new ArrayList<FieldElement>();
+        for (var recordComponentNode : classNode.getRecordComponents()) {
+            fieldElements.add(
+                new GroovyFieldElement(
+                    visitorContext,
+                    GroovyClassElement.this,
+                    classNode.getField(recordComponentNode.getName()),
+                    elementAnnotationMetadataFactory
+                )
+            );
+        }
+        return fieldElements;
     }
 
     @Nullable
@@ -486,7 +554,7 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
         if (value.readAccessKind != BeanProperties.AccessKind.METHOD) {
             value.getter = null;
         }
-        GroovyPropertyElement propertyElement = new GroovyPropertyElement(
+        var propertyElement = new GroovyPropertyElement(
             visitorContext,
             this,
             value.type,
@@ -497,7 +565,8 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
             value.propertyName,
             value.readAccessKind == null ? PropertyElement.AccessKind.METHOD : PropertyElement.AccessKind.valueOf(value.readAccessKind.name()),
             value.writeAccessKind == null ? PropertyElement.AccessKind.METHOD : PropertyElement.AccessKind.valueOf(value.writeAccessKind.name()),
-            value.isExcluded);
+            value.isExcluded
+        );
         ref.set(propertyElement);
         return propertyElement;
     }
@@ -534,21 +603,20 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
 
     @Override
     public String getPackageName() {
-        return classNode.getPackageName();
+        return Objects.requireNonNullElse(classNode.getPackageName(), "");
     }
 
     @Override
     public PackageElement getPackage() {
         final PackageNode aPackage = classNode.getPackage();
-        if (aPackage != null) {
-            return new GroovyPackageElement(
-                visitorContext,
-                aPackage,
-                elementAnnotationMetadataFactory
-            );
-        } else {
+        if (aPackage == null) {
             return PackageElement.DEFAULT_PACKAGE;
         }
+        return new GroovyPackageElement(
+            visitorContext,
+            aPackage,
+            elementAnnotationMetadataFactory
+        );
     }
 
     @Override
@@ -631,6 +699,9 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
     }
 
     private List<PropertyNode> getPropertyNodes() {
+        if (propertyElements != null) {
+            return propertyElements;
+        }
         var propertyNodes = new ArrayList<PropertyNode>();
         ClassNode classNode = this.classNode;
         while (classNode != null && !classNode.equals(ClassHelper.OBJECT_TYPE) && !classNode.equals(ClassHelper.Enum_Type)) {
@@ -643,6 +714,7 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
                 propertyElements.add(propertyNode);
             }
         }
+        this.propertyElements = propertyElements;
         return propertyElements;
     }
 
@@ -707,7 +779,7 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
         @Override
         protected Set<AnnotatedNode> getExcludedNativeElements(ElementQuery.Result<?> result) {
             if (result.isExcludePropertyElements()) {
-                Set<AnnotatedNode> excluded = new HashSet<>();
+                var excluded = new HashSet<AnnotatedNode>();
                 for (PropertyElement excludePropertyElement : getBeanProperties()) {
                     excludePropertyElement.getReadMethod()
                         .filter(m -> !m.isSynthetic())
@@ -754,26 +826,26 @@ public class GroovyClassElement extends AbstractGroovyElement implements Arrayab
             } else if (elementType == MethodElement.class) {
                 return classNode.getMethods()
                     .stream()
-                    .filter(methodNode -> !JUNK_METHOD_FILTER.test(methodNode) && (methodNode.getModifiers() & Opcodes.ACC_SYNTHETIC) == 0 && (includeAbstract || isNonAbstract(classNode, methodNode)))
+                    .filter(methodNode -> !JUNK_METHOD_FILTER.test(methodNode) && (methodNode.getModifiers() & ACC_SYNTHETIC) == 0 && (includeAbstract || isNonAbstract(classNode, methodNode)))
                     .<AnnotatedNode>map(m -> m)
                     .toList();
             } else if (elementType == FieldElement.class) {
                 return classNode.getFields().stream()
-                    .filter(fieldNode -> (!fieldNode.isEnum() || result.isIncludeEnumConstants()) && !JUNK_FIELD_FILTER.test(fieldNode) && (fieldNode.getModifiers() & Opcodes.ACC_SYNTHETIC) == 0)
+                    .filter(fieldNode -> (!fieldNode.isEnum() || result.isIncludeEnumConstants()) && !JUNK_FIELD_FILTER.test(fieldNode) && (fieldNode.getModifiers() & ACC_SYNTHETIC) == 0)
                     .<AnnotatedNode>map(m -> m)
                     .toList();
 
             } else if (elementType == ConstructorElement.class) {
                 return classNode.getDeclaredConstructors()
                     .stream()
-                    .filter(methodNode -> !JUNK_METHOD_FILTER.test(methodNode) && (methodNode.getModifiers() & Opcodes.ACC_SYNTHETIC) == 0)
+                    .filter(methodNode -> !JUNK_METHOD_FILTER.test(methodNode) && (methodNode.getModifiers() & ACC_SYNTHETIC) == 0)
                     .<AnnotatedNode>map(m -> m)
                     .toList();
             } else if (elementType == ClassElement.class) {
                 return StreamSupport.stream(
                         Spliterators.spliteratorUnknownSize(classNode.getInnerClasses(), Spliterator.ORDERED),
                         false)
-                    .filter(innerClassNode -> (innerClassNode.getModifiers() & Opcodes.ACC_SYNTHETIC) == 0)
+                    .filter(innerClassNode -> (innerClassNode.getModifiers() & ACC_SYNTHETIC) == 0)
                     .<AnnotatedNode>map(m -> m)
                     .toList();
             } else {

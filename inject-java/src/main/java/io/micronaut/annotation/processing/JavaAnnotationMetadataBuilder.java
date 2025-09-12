@@ -371,12 +371,27 @@ public class JavaAnnotationMetadataBuilder extends AbstractAnnotationMetadataBui
             final MetadataAnnotationValueVisitor resolver = new MetadataAnnotationValueVisitor(originatingElement, (ExecutableElement) member, resolvedDefaults);
             value.accept(resolver, this);
             Object resolvedValue = resolver.resolvedValue;
+
             if (resolvedValue != null) {
-                if (isEvaluatedExpression(resolvedValue)) {
-                    resolvedValue = buildEvaluatedExpressionReference(originatingElement, annotationName, memberName, resolvedValue);
+                if ("<error>".equals(resolvedValue)) {
+                    if (Class.class.getName().equals(this.modelUtils.resolveTypeName(((ExecutableElement) member).getReturnType()))) {
+                        resolvedValue = new AnnotationClassValue<>(
+                            new AnnotationClassValue.UnresolvedClass(new PostponeToNextRoundException(
+                                originatingElement,
+                                originatingElement.getSimpleName().toString() + "@" + annotationName + "(" + memberName + ")"
+                            ))
+                        );
+                        annotationValues.put(memberName, resolvedValue);
+                    } else {
+                        throw new PostponeToNextRoundException(originatingElement,  memberName);
+                    }
+                } else {
+                    if (isEvaluatedExpression(resolvedValue)) {
+                        resolvedValue = buildEvaluatedExpressionReference(originatingElement, annotationName, memberName, resolvedValue);
+                    }
+                    validateAnnotationValue(originatingElement, annotationName, member, memberName, resolvedValue);
+                    annotationValues.put(memberName, resolvedValue);
                 }
-                validateAnnotationValue(originatingElement, annotationName, member, memberName, resolvedValue);
-                annotationValues.put(memberName, resolvedValue);
             }
         }
     }
@@ -447,7 +462,13 @@ public class JavaAnnotationMetadataBuilder extends AbstractAnnotationMetadataBui
     private boolean isValidDefaultValue(ExecutableElement executableElement) {
         AnnotationValue defaultValue = executableElement.getDefaultValue();
         if (defaultValue != null) {
-            Object v = defaultValue.getValue();
+            Object v;
+            try {
+                v = defaultValue.getValue();
+            } catch (UnsupportedOperationException e) {
+                // if this is Attribute it can throw UnsupportedOperationException
+                return false;
+            }
             if (v != null) {
                 if (v instanceof String string) {
                     return StringUtils.isNotEmpty(string);

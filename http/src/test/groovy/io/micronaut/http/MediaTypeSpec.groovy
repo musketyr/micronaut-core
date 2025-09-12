@@ -205,4 +205,11 @@ class MediaTypeSpec extends Specification {
         "text/plain"            | "text/hml"            | false
         "text/*"                | "application/json"    | false
     }
+
+    @Unroll
+    void "compare media type"() {
+        expect:
+            !MediaType.APPLICATION_JSON_TYPE.equals(MediaType.TEXT_XML_TYPE)
+            MediaType.APPLICATION_JSON_TYPE != MediaType.TEXT_XML_TYPE
+    }
 }

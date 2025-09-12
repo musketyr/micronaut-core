@@ -17,7 +17,9 @@ import org.junit.platform.suite.api.SuiteDisplayName;
 @SuppressWarnings("java:S2187") // This runs a suite of tests, but has no tests of its own
 @ExcludeClassNamePatterns({
     "io.micronaut.http.client.tck.tests.ContinueTest", // Unsupported body type errors
+    "io.micronaut.http.client.tck.tests.RawTest", // There's no raw client for the JDK client
+    "io.micronaut.http.client.tck.tests.StreamTest", // There's no streaming client for the JDK client
+    "io.micronaut.http.client.tck.tests.DecompressionConfigTest", // Netty-specific decompression behavior; not applicable to JDK client
 })
 public class JdkHttpMethodTests {
 }
-

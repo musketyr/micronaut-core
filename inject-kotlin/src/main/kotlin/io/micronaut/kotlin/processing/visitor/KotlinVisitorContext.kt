@@ -45,7 +45,6 @@ import java.net.URI
 import java.nio.file.Files
 import java.util.*
 import java.util.function.BiConsumer
-import kotlin.collections.ArrayList
 
 @OptIn(KspExperimental::class)
 internal class KotlinVisitorContext(
@@ -61,16 +60,42 @@ internal class KotlinVisitorContext(
     private val expressionCompilationContextFactory = DefaultExpressionCompilationContextFactory(this)
     val nativeElementsHelper = KotlinNativeElementsHelper(resolver)
     var aggregating: Boolean = false
+
+    val extraOpenAnnotations: Array<String> by lazy {
+        var allOpenAnnotations = environment.options["kotlin.allopen.annotations"]
+        if (allOpenAnnotations.isNullOrEmpty()) {
+            allOpenAnnotations = System.getProperty("kotlin.allopen.annotations")
+        }
+        if (allOpenAnnotations == null) {
+            allOpenAnnotations = ""
+        }
+        allOpenAnnotations.split(",", "|").toTypedArray()
+    }
+
     init {
         try {
             // Workaround for bug in KSP https://github.com/google/ksp/issues/1493
             val resolverImplClass = ClassUtils.forName("com.google.devtools.ksp.processing.impl.ResolverImpl", javaClass.classLoader).orElseThrow()
             val kotlinTypeMapperClass = ClassUtils.forName("org.jetbrains.kotlin.codegen.state.KotlinTypeMapper", javaClass.classLoader).orElseThrow()
             val kotlinTypeMapperInstance = ReflectionUtils.getFieldValue(resolverImplClass, "typeMapper", resolver).orElseThrow()
-            ReflectionUtils.setField(kotlinTypeMapperClass, "useOldManglingRulesForFunctionAcceptingInlineClass", kotlinTypeMapperInstance, false)
+            try {
+                // Pre-2.1.20 field name
+                ReflectionUtils.setField(kotlinTypeMapperClass, "useOldManglingRulesForFunctionAcceptingInlineClass", kotlinTypeMapperInstance, false)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            // 2.1.20+ field name
+            ReflectionUtils.setField(kotlinTypeMapperClass, "useOldInlineClassesManglingScheme", kotlinTypeMapperInstance, false)
         } catch (e: Exception) {
             // Ignore
         }
+
+    }
+
+    fun updateResolver(resolver: Resolver) {
+        this.resolver = resolver
+        annotationMetadataBuilder.resolver = resolver
+        nativeElementsHelper.resolver = resolver
     }
 
     override fun getLanguage() = VisitorContext.Language.KOTLIN
@@ -108,7 +133,10 @@ internal class KotlinVisitorContext(
     override fun getClassElement(name: String): Optional<ClassElement> {
         var declaration = resolver.getClassDeclarationByName(name)
         if (declaration == null) {
-            declaration = resolver.getClassDeclarationByName(name.replace('$', '.'))
+            declaration = resolver.getClassDeclarationByName(
+                name.replace(".$", ".")
+                    .replace('$', '.')
+            )
         }
         return Optional.ofNullable(declaration)
             .map(elementFactory::newClassElement)
@@ -122,7 +150,7 @@ internal class KotlinVisitorContext(
         return resolver.getDeclarationsFromPackage(aPackage)
             .filterIsInstance<KSClassDeclaration>()
             .filter { declaration ->
-                declaration.annotations.any { ann ->
+                stereotypes.isEmpty() || declaration.annotations.any { ann ->
                     stereotypes.contains(
                         KotlinAnnotationMetadataBuilder.getAnnotationTypeName(
                             resolver,

@@ -19,7 +19,8 @@ import io.micronaut.annotation.processing.visitor.JavaClassElement;
 import io.micronaut.annotation.processing.visitor.JavaElementFactory;
 import io.micronaut.annotation.processing.visitor.JavaNativeElement;
 import io.micronaut.context.annotation.Requires;
-import io.micronaut.core.annotation.Generated;
+import io.micronaut.context.visitor.VisitorUtils;
+import io.micronaut.core.annotation.NextMajorVersion;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.io.service.SoftServiceLoader;
@@ -27,6 +28,8 @@ import io.micronaut.core.order.OrderUtil;
 import io.micronaut.core.util.CollectionUtils;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.core.version.VersionUtils;
+import io.micronaut.inject.annotation.AbstractAnnotationMetadataBuilder;
+import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.ConstructorElement;
 import io.micronaut.inject.ast.ElementQuery;
 import io.micronaut.inject.ast.EnumConstantElement;
@@ -34,6 +37,8 @@ import io.micronaut.inject.ast.FieldElement;
 import io.micronaut.inject.ast.MemberElement;
 import io.micronaut.inject.ast.MethodElement;
 import io.micronaut.inject.processing.ProcessingException;
+import io.micronaut.inject.visitor.ElementPostponedToNextRoundException;
+import io.micronaut.inject.visitor.TypeElementQuery;
 import io.micronaut.inject.visitor.TypeElementVisitor;
 import io.micronaut.inject.visitor.VisitorContext;
 import io.micronaut.inject.writer.AbstractBeanDefinitionBuilder;
@@ -41,6 +46,7 @@ import io.micronaut.inject.writer.AbstractBeanDefinitionBuilder;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedOptions;
+import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.TypeMirror;
 import java.io.IOException;
@@ -76,7 +82,6 @@ import static io.micronaut.core.util.StringUtils.EMPTY_STRING;
     VisitorContext.MICRONAUT_PROCESSING_MODULE
 })
 public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcessor {
-    private static final SoftServiceLoader<TypeElementVisitor> SERVICE_LOADER = SoftServiceLoader.load(TypeElementVisitor.class, TypeElementVisitorProcessor.class.getClassLoader()).disableFork();
     private static final Set<String> VISITOR_WARNINGS;
     private static final Set<String> SUPPORTED_ANNOTATION_NAMES;
 
@@ -107,7 +112,6 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
 
     private List<LoadedVisitor> loadedVisitors;
     private Collection<? extends TypeElementVisitor<?, ?>> typeElementVisitors;
-    private final Set<String> pendingTypes = new LinkedHashSet<>();
 
     /**
      * The visited annotation names.
@@ -218,10 +222,11 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
             .collect(Collectors.toSet());
     }
 
+    @NextMajorVersion("`roundEnv.getRootElements()` should be removed in Micronaut 4. " +
+        "It should not be possible to process elements without at least one annotation present and this call breaks that assumption")
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-        if (!loadedVisitors.isEmpty() && !(annotations.size() == 1
-            && Generated.class.getName().equals(annotations.iterator().next().getQualifiedName().toString()))) {
+        if (!loadedVisitors.isEmpty() && !processingGeneratedAnnotation(annotations)) {
 
             TypeElement groovyObjectTypeElement = elementUtils.getTypeElement("groovy.lang.GroovyObject");
             TypeMirror groovyObjectType = groovyObjectTypeElement != null ? groovyObjectTypeElement.asType() : null;
@@ -235,14 +240,23 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
                 ).filter(notGroovyObject).forEach(elements::add);
             }
 
-            // This call to getRootElements() should be removed in Micronaut 4. It should not be possible
-            // to process elements without at least one annotation present and this call breaks that assumption.
             modelUtils.resolveTypeElements(
                 roundEnv.getRootElements()
             ).filter(notGroovyObject).forEach(elements::add);
 
-            pendingTypes.stream().map(elementUtils::getTypeElement).filter(Objects::nonNull).forEach(elements::add);
-            pendingTypes.clear();
+            for (Object nativeType : postponedTypes.values()) {
+                if (nativeType instanceof Element element) {
+                    AbstractAnnotationMetadataBuilder.CachedAnnotationMetadata cachedAnnotationMetadata = javaVisitorContext.getAnnotationMetadataBuilder().lookupOrBuildForType(element);
+                    if (!cachedAnnotationMetadata.wasCleared()) {
+                        AbstractAnnotationMetadataBuilder.clearMutated(nativeType);
+                        cachedAnnotationMetadata = javaVisitorContext.getAnnotationMetadataBuilder().lookupOrBuildForType(element);
+                        javaVisitorContext.getNativeElementsHelper().cleanupForClass(nativeType);
+                        cachedAnnotationMetadata.markCleared();
+                    }
+                }
+            }
+            postponedTypes.keySet().stream().map(elementUtils::getTypeElement).filter(Objects::nonNull).forEach(elements::add);
+            postponedTypes.clear();
 
             if (!elements.isEmpty()) {
 
@@ -257,7 +271,19 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
 
                 List<JavaClassElement> javaClassElements = elements.stream()
                     .map(typeElement -> elementFactory.newSourceClassElement(typeElement, elementAnnotationMetadataFactory))
-                    .toList();
+                    .collect(Collectors.toCollection(() -> new ArrayList<>(elements.size())));
+                List<ClassElement> extraClasses = new ArrayList<>();
+                for (JavaClassElement javaClassElement : new ArrayList<>(javaClassElements)) {
+                    try {
+                        extraClasses.addAll(VisitorUtils.collectImportedElements(javaClassElement, javaVisitorContext));
+                        javaClassElements.addAll((Collection) extraClasses);
+                    } catch (PostponeToNextRoundException e) {
+                        postponeElement(javaClassElement, e.getNativeErrorElement(), e);
+                    } catch (ElementPostponedToNextRoundException e) {
+                        Element element = PostponeToNextRoundException.resolvedFailedElement(e.getOriginatingElement());
+                        postponeElement(javaClassElement, element, e);
+                    }
+                }
 
                 for (LoadedVisitor loadedVisitor : loadedVisitors) {
                     for (JavaClassElement javaClassElement : javaClassElements) {
@@ -272,7 +298,10 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
                             }
                             error(originatingElement.element(), e.getMessage());
                         } catch (PostponeToNextRoundException e) {
-                            pendingTypes.add(javaClassElement.getName());
+                            postponeElement(javaClassElement, e.getNativeErrorElement(), e);
+                        } catch (ElementPostponedToNextRoundException e) {
+                            Element element = PostponeToNextRoundException.resolvedFailedElement(e.getOriginatingElement());
+                            postponeElement(javaClassElement, element, e);
                         }
                     }
                 }
@@ -304,27 +333,62 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
 
         if (roundEnv.processingOver()) {
             javaVisitorContext.finish();
-            writeBeanDefinitionsToMetaInf();
         }
         return false;
     }
 
-    private void visitClass(LoadedVisitor visitor, JavaClassElement classElement) {
-        visitor.getVisitor().visitClass(classElement, javaVisitorContext);
-
-        for (ConstructorElement constructorElement : classElement.getSourceEnclosedElements(ElementQuery.CONSTRUCTORS)) {
-            visitConstructor(visitor, constructorElement);
+    private <T extends Throwable> void postponeElement(JavaClassElement javaClassElement, Element originalElement, T e) throws T {
+        if (originalElement == null) {
+            // should never happen.
+            throw e;
         }
-        for (MemberElement memberElement : classElement.getSourceEnclosedElements(ElementQuery.ALL_FIELD_AND_METHODS)) {
-            if (memberElement instanceof EnumConstantElement enumConstantElement) {
-                visitEnumConstant(visitor, enumConstantElement);
-            } else if (memberElement instanceof FieldElement fieldElement) {
-                visitField(visitor, fieldElement);
-            } else if (memberElement instanceof MethodElement methodElement) {
-                visitMethod(visitor, methodElement);
-            } else {
-                throw new IllegalStateException("Unknown element: " + memberElement);
+        postponedTypes.put(javaClassElement.getCanonicalName(), originalElement);
+    }
+
+    private void visitClass(LoadedVisitor visitor, JavaClassElement classElement) {
+        TypeElementQuery query = visitor.getVisitor().query();
+
+        try {
+            javaVisitorContext.setVisitUnresolvedInterfaces(query.visitsUnresolvedInterfaces());
+
+            visitor.getVisitor().visitClass(classElement, javaVisitorContext);
+
+            if (query.includesConstructors()) {
+                for (ConstructorElement constructorElement : classElement.getSourceEnclosedElements(ElementQuery.CONSTRUCTORS)) {
+                    visitConstructor(visitor, constructorElement);
+                }
             }
+            boolean includesFields = query.includesFields() || query.includesEnumConstants();
+            boolean includesMethods = query.includesMethods();
+            List<? extends MemberElement> elements;
+            if (includesMethods && includesFields) {
+                elements = classElement.getSourceEnclosedElements(ElementQuery.ALL_FIELD_AND_METHODS);
+            } else if (includesMethods) {
+                elements = classElement.getSourceEnclosedElements(ElementQuery.ALL_METHODS);
+            } else if (includesFields) {
+                elements = classElement.getSourceEnclosedElements(ElementQuery.ALL_FIELDS);
+            } else {
+                elements = List.of();
+            }
+            for (MemberElement memberElement : elements) {
+                if (memberElement instanceof EnumConstantElement enumConstantElement) {
+                    if (query.includesEnumConstants()) {
+                        visitEnumConstant(visitor, enumConstantElement);
+                    }
+                } else if (memberElement instanceof FieldElement fieldElement) {
+                    if (query.includesFields()) {
+                        visitField(visitor, fieldElement);
+                    }
+                } else if (memberElement instanceof MethodElement methodElement) {
+                    if (includesMethods) {
+                        visitMethod(visitor, methodElement);
+                    }
+                } else {
+                    throw new IllegalStateException("Unknown element: " + memberElement);
+                }
+            }
+        } finally {
+            javaVisitorContext.setVisitUnresolvedInterfaces(false);
         }
     }
 
@@ -368,22 +432,11 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
         return typeElementVisitors;
     }
 
-    /**
-     * Writes {@link io.micronaut.inject.BeanDefinitionReference} into /META-INF/services/io.micronaut.inject.BeanDefinitionReference.
-     */
-    private void writeBeanDefinitionsToMetaInf() {
-        try {
-            classWriterOutputVisitor.finish();
-        } catch (Exception e) {
-            String message = e.getMessage();
-            error("Error occurred writing META-INF files: %s", message != null ? message : e);
-        }
-    }
-
     @NonNull
-    private static Collection<? extends TypeElementVisitor<?, ?>> findCoreTypeElementVisitors(
-        @Nullable Set<String> warnings) {
-        return SERVICE_LOADER.collectAll(visitor -> {
+    private static Collection<? extends TypeElementVisitor<?, ?>> findCoreTypeElementVisitors(@Nullable Set<String> warnings) {
+        return SoftServiceLoader.load(TypeElementVisitor.class, TypeElementVisitorProcessor.class.getClassLoader())
+            .disableFork()
+            .collectAll(visitor -> {
                 if (!visitor.isEnabled()) {
                     return false;
                 }

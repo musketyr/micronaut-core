@@ -23,7 +23,6 @@ import io.micronaut.inject.ast.ElementFactory;
 import io.micronaut.inject.ast.TypedElement;
 import io.micronaut.inject.ast.annotation.ElementAnnotationMetadataFactory;
 import io.micronaut.inject.ast.beans.BeanElementBuilder;
-import io.micronaut.inject.configuration.ConfigurationMetadataBuilder;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -60,7 +59,8 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
             case ENUM -> new JavaEnumElement(
                 new JavaNativeElement.Class(type),
                 annotationMetadataFactory,
-                visitorContext
+                visitorContext,
+                null
             );
             case ANNOTATION_TYPE -> new JavaAnnotationElement(
                 new JavaNativeElement.Class(type),
@@ -94,7 +94,8 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
             return new JavaEnumElement(
                 new JavaNativeElement.Class(type),
                 annotationMetadataFactory,
-                visitorContext
+                visitorContext,
+                null
             ) {
                 @NonNull
                 @Override
@@ -102,7 +103,6 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
                     return new JavaBeanDefinitionBuilder(
                         this,
                         type,
-                        ConfigurationMetadataBuilder.INSTANCE,
                         annotationMetadataFactory,
                         visitorContext
                     );
@@ -120,7 +120,6 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
                     return new JavaBeanDefinitionBuilder(
                         this,
                         type,
-                        ConfigurationMetadataBuilder.INSTANCE,
                         annotationMetadataFactory,
                         visitorContext
                     );
@@ -148,7 +147,6 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
                 return new JavaBeanDefinitionBuilder(
                     this,
                     type,
-                    ConfigurationMetadataBuilder.INSTANCE,
                     annotationMetadataFactory,
                     visitorContext
                 );
@@ -225,14 +223,14 @@ public class JavaElementFactory implements ElementFactory<Element, TypeElement, 
         TypeMirror returnType = executableElement.getReturnType();
         TypeKind returnKind = returnType.getKind();
         if (returnKind == TypeKind.ERROR) {
-            throw new PostponeToNextRoundException(executableElement, member.getName() + " " + executableElement);
+            throw new PostponeToNextRoundException(member, member.getName() + " " + executableElement);
         }
     }
 
     private void failIfPostponeIsNeeded(TypedElement member, VariableElement variableElement) {
         TypeMirror type = variableElement.asType();
         if (type.getKind() == TypeKind.ERROR) {
-            throw new PostponeToNextRoundException(variableElement, member.getName() + " " + variableElement);
+            throw new PostponeToNextRoundException(member, member.getName() + " " + variableElement);
         }
     }
 

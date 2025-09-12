@@ -22,6 +22,7 @@ import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.FieldElement;
 import io.micronaut.inject.ast.MemberElement;
 import io.micronaut.inject.ast.annotation.ElementAnnotationMetadataFactory;
+import io.micronaut.inject.processing.JavaModelUtils;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
@@ -37,7 +38,7 @@ import java.util.Map;
  * @since 1.0
  */
 @Internal
-class JavaFieldElement extends AbstractJavaElement implements FieldElement {
+class JavaFieldElement extends AbstractJavaMemberElement implements FieldElement {
 
     private final VariableElement variableElement;
     private JavaClassElement owningType;
@@ -71,6 +72,11 @@ class JavaFieldElement extends AbstractJavaElement implements FieldElement {
         this.owningType = owningType;
     }
 
+    @Override
+    protected AnnotationMetadata getTypeAnnotationMetadata() {
+        return getType().getTypeAnnotationMetadata();
+    }
+
     @NonNull
     @Override
     public JavaNativeElement.Variable getNativeType() {
@@ -97,6 +103,9 @@ class JavaFieldElement extends AbstractJavaElement implements FieldElement {
     public ClassElement getType() {
         if (type == null) {
             type = newClassElement(getNativeType(), variableElement.asType(), Collections.emptyMap());
+            if (canBeMarkedWithNonNull(type)) {
+                type.getTypeAnnotationMetadata().annotate(NonNull.class);
+            }
         }
         return type;
     }
@@ -106,6 +115,9 @@ class JavaFieldElement extends AbstractJavaElement implements FieldElement {
     public ClassElement getGenericType() {
         if (genericType == null) {
             genericType = newClassElement(getNativeType(), variableElement.asType(), getDeclaringType().getTypeArguments());
+            if (canBeMarkedWithNonNull(genericType)) {
+                genericType.getTypeAnnotationMetadata().annotate(NonNull.class);
+            }
         }
         return this.genericType;
     }
@@ -130,8 +142,8 @@ class JavaFieldElement extends AbstractJavaElement implements FieldElement {
         if (resolvedDeclaringClass == null) {
             Element enclosingElement = variableElement.getEnclosingElement();
             if (enclosingElement instanceof TypeElement te) {
-                String typeName = te.getQualifiedName().toString();
-                if (owningType.getName().equals(typeName)) {
+                String typeName = JavaModelUtils.getClassName(te);
+                if (owningType.getName().equals(JavaModelUtils.getClassName(te))) {
                     resolvedDeclaringClass = owningType;
                 } else {
                     TypeMirror returnType = te.asType();

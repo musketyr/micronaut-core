@@ -16,12 +16,14 @@
 package io.micronaut.runtime.http.scope
 
 import io.micronaut.context.annotation.Prototype
+import io.micronaut.context.annotation.Requires
 import io.micronaut.context.event.ApplicationEventListener
 import io.micronaut.http.HttpRequest
 import io.micronaut.http.annotation.Controller
 import io.micronaut.http.annotation.Get
 import io.micronaut.http.client.HttpClient
 import io.micronaut.http.client.annotation.Client
+import io.micronaut.http.context.event.HttpRequestReceivedEvent
 import io.micronaut.http.context.event.HttpRequestTerminatedEvent
 import io.micronaut.http.server.netty.AbstractMicronautSpec
 import io.micronaut.scheduling.TaskExecutors
@@ -44,8 +46,10 @@ class RequestScopeSpec extends AbstractMicronautSpec {
     PollingConditions conditions = new PollingConditions(delay: 0.5, timeout: 3)
 
     def setup() {
-        ReqTerminatedListener listener = applicationContext.getBean(ReqTerminatedListener)
-        listener.callCount = 0
+        ReqTerminatedListener terminatedListener = applicationContext.getBean(ReqTerminatedListener)
+        ReqReceivedListener receivedListener = applicationContext.getBean(ReqReceivedListener)
+        terminatedListener.callCount = 0
+        receivedListener.callCount = 0
         SimpleBean.destroyed.set(0)
     }
 
@@ -77,7 +81,9 @@ class RequestScopeSpec extends AbstractMicronautSpec {
 
     void "test @Request bean created per request"() {
         given:
-        ReqTerminatedListener listener = applicationContext.getBean(ReqTerminatedListener)
+        ReqTerminatedListener terminatedListener = applicationContext.getBean(ReqTerminatedListener)
+        ReqReceivedListener receivedListener = applicationContext.getBean(ReqReceivedListener)
+
 
         when:
         def result = httpClient.toBlocking().retrieve(HttpRequest.GET("/test-request-scope"), String)
@@ -87,7 +93,8 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         RequestBean.BEANS_CREATED.size() == 1
         RequestScopeFactoryBean.BEANS_CREATED.size() == 1
         conditions.eventually {
-            listener.callCount == 1
+            terminatedListener.callCount == 1
+            receivedListener.callCount == 1
             RequestBean.BEANS_CREATED.first().dead
             RequestScopeFactoryBean.BEANS_CREATED.first().dead
         }
@@ -95,7 +102,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         when:
         RequestBean.BEANS_CREATED.clear()
         RequestScopeFactoryBean.BEANS_CREATED.clear()
-        listener.callCount = 0
+        terminatedListener.callCount = 0
         result = httpClient.toBlocking().retrieve(HttpRequest.GET("/test-request-scope"), String)
 
         then:
@@ -103,7 +110,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         RequestBean.BEANS_CREATED.size() == 1
         RequestScopeFactoryBean.BEANS_CREATED.size() == 1
         conditions.eventually {
-            listener.callCount == 1
+            terminatedListener.callCount == 1
             RequestBean.BEANS_CREATED.first().dead
             RequestScopeFactoryBean.BEANS_CREATED.first().dead
         }
@@ -111,7 +118,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         when:
         RequestBean.BEANS_CREATED.clear()
         RequestScopeFactoryBean.BEANS_CREATED.clear()
-        listener.callCount = 0
+        terminatedListener.callCount = 0
         result = httpClient.toBlocking().retrieve(HttpRequest.GET("/test-request-scope"), String)
 
         then:
@@ -119,7 +126,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         RequestBean.BEANS_CREATED.size() == 1
         RequestScopeFactoryBean.BEANS_CREATED.size() == 1
         conditions.eventually {
-            listener.callCount == 1
+            terminatedListener.callCount == 1
             RequestBean.BEANS_CREATED.first().dead
             RequestScopeFactoryBean.BEANS_CREATED.first().dead
         }
@@ -127,7 +134,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         when:
         RequestBean.BEANS_CREATED.clear()
         RequestScopeFactoryBean.BEANS_CREATED.clear()
-        listener.callCount = 0
+        terminatedListener.callCount = 0
         result = httpClient.toBlocking().retrieve(HttpRequest.GET("/test-request-scope-stream"), String)
 
         then:
@@ -135,7 +142,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         RequestBean.BEANS_CREATED.size() == 1
         RequestScopeFactoryBean.BEANS_CREATED.size() == 1
         conditions.eventually {
-            listener.callCount == 1
+            terminatedListener.callCount == 1
             RequestBean.BEANS_CREATED.first().dead
             RequestScopeFactoryBean.BEANS_CREATED.first().dead
         }
@@ -149,6 +156,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         result == "OK"
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @RequestScope
     static class RequestBean {
 
@@ -174,6 +182,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         }
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @RequestScope
     static class SimpleRequestBean {
 
@@ -193,6 +202,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
 
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @Prototype
     static class SimpleBean {
 
@@ -205,6 +215,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
 
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @Controller
     static class SimpleTestController {
         final SimpleRequestBean simpleRequestBean
@@ -231,6 +242,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         }
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @RequestScope
     static class RequestAwareBean implements RequestAware {
 
@@ -242,6 +254,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         }
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @Singleton
     static class MessageService {
 
@@ -266,6 +279,7 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         }
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @Controller
     static class TestController {
 
@@ -294,12 +308,24 @@ class RequestScopeSpec extends AbstractMicronautSpec {
         }
     }
 
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
     @Singleton
     static class ReqTerminatedListener implements ApplicationEventListener<HttpRequestTerminatedEvent> {
         int callCount
 
         @Override
         void onApplicationEvent(HttpRequestTerminatedEvent event) {
+            callCount++
+        }
+    }
+
+    @Requires(property = "spec.name", value = "RequestScopeSpec")
+    @Singleton
+    static class ReqReceivedListener implements ApplicationEventListener<HttpRequestReceivedEvent> {
+        int callCount
+
+        @Override
+        void onApplicationEvent(HttpRequestReceivedEvent event) {
             callCount++
         }
     }
