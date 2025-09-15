@@ -61,7 +61,6 @@ import io.micronaut.core.annotation.AnnotationMetadataProvider;
 import io.micronaut.core.annotation.AnnotationMetadataResolver;
 import io.micronaut.core.annotation.AnnotationUtil;
 import io.micronaut.core.annotation.AnnotationValue;
-import io.micronaut.core.annotation.Indexes;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NextMajorVersion;
 import io.micronaut.core.annotation.NonNull;
@@ -149,6 +148,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -170,10 +170,15 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
     protected static final Logger LOG_LIFECYCLE = LoggerFactory.getLogger(DefaultBeanContext.class.getPackage().getName() + ".lifecycle");
     private static final String SCOPED_PROXY_ANN = "io.micronaut.runtime.context.scope.ScopedProxy";
     private static final String INTRODUCTION_TYPE = "io.micronaut.aop.Introduction";
-    private static final String ADAPTER_TYPE = "io.micronaut.aop.Adapter";
-    private static final String PARALLEL_TYPE = Parallel.class.getName();
-    private static final String INDEXES_TYPE = Indexes.class.getName();
     private static final String REPLACES_ANN = Replaces.class.getName();
+    private static final List<Class<?>> KNOWN_INDEX_TYPE = List.of(
+        ResourceLoader.class,
+        TypeConverter.class,
+        TypeConverterRegistrar.class,
+        ApplicationEventListener.class,
+        BeanCreatedEventListener.class,
+        BeanInitializedEventListener.class
+    );
 
     private static final String MSG_COULD_NOT_BE_LOADED = "] could not be loaded: ";
     public static final String MSG_BEAN_DEFINITION = "Bean definition [";
@@ -226,14 +231,13 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
             ValueResolver.class,
             PropertyPlaceholderResolver.class
     );
-    private final Set<Class<?>> indexedTypes = CollectionUtils.setOf(
-            ResourceLoader.class,
-            TypeConverter.class,
-            TypeConverterRegistrar.class,
-            ApplicationEventListener.class,
-            BeanCreatedEventListener.class,
-            BeanInitializedEventListener.class
-    );
+    private final Function<Class<?>, Collection<BeanDefinitionProducer>> COMPUTE_INDEXES_FN = new Function<Class<?>, Collection<BeanDefinitionProducer>>() {
+        // Keep an anonymous class for performance
+        @Override
+        public Collection<BeanDefinitionProducer> apply(Class<?> indexedType) {
+            return new ArrayList<>(20);
+        }
+    };
     private final CustomScopeRegistry customScopeRegistry;
     private final String[] eagerInitStereotypes;
     private final boolean eagerInitStereotypesPresent;
@@ -365,7 +369,6 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Starting BeanContext");
                 }
-                registerConversionService();
                 configureAndStartContext();
                 if (LOG.isDebugEnabled()) {
                     String activeConfigurations = beanConfigurations
@@ -1716,7 +1719,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
         Class<B> beanType = definition.getBeanType();
         BeanDefinitionProducer producer = new BeanDefinitionProducer(definition);
         this.beanDefinitionsClasses.add(producer);
-        for (Class<?> indexedType : indexedTypes) {
+        for (Class<?> indexedType : beanIndex.keySet()) {
             if (indexedType == beanType || indexedType.isAssignableFrom(beanType)) {
                 final Collection<BeanDefinitionProducer> indexed = resolveTypeIndex(indexedType);
                 indexed.add(producer);
@@ -1742,7 +1745,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
     @Internal
     <B> void removeBeanDefinition(RuntimeBeanDefinition<B> definition) {
         Class<B> beanType = definition.getBeanType();
-        for (Class<?> indexedType : indexedTypes) {
+        for (Class<?> indexedType : beanIndex.keySet()) {
             if (indexedType == beanType || indexedType.isAssignableFrom(beanType)) {
                 resolveTypeIndex(indexedType).forEach(p -> p.disableIfMatch(definition));
                 break;
@@ -2163,21 +2166,8 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
                                                                    boolean collectIterables,
                                                                    Predicate<BeanDefinition<T>> predicate) {
         ArgumentUtils.requireNonNull("beanType", beanType);
-        final Class<T> beanClass = beanType.getType();
         if (LOG.isDebugEnabled()) {
             LOG.debug("Finding candidate beans for type: {}", beanType);
-        }
-        // first traverse component definition classes and load candidates
-
-        Collection<BeanDefinitionProducer> beanDefinitionsClasses;
-
-        if (indexedTypes.contains(beanClass)) {
-            beanDefinitionsClasses = beanIndex.get(beanClass);
-            if (beanDefinitionsClasses == null) {
-                beanDefinitionsClasses = Collections.emptyList();
-            }
-        } else {
-            beanDefinitionsClasses = this.beanDefinitionsClasses;
         }
 
         return collectBeanCandidates(
@@ -2185,7 +2175,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
             beanType,
             collectIterables,
             predicate,
-            beanDefinitionsClasses
+            beanIndex.getOrDefault(beanType.getType(), beanDefinitionsClasses)
         );
     }
 
@@ -3356,6 +3346,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
 
     private void configureAndStartContext() {
         configureContextInternal();
+        registerConversionService();
         initializeEventListeners();
         initializeTypeConverters();
         initializeContext(
@@ -3416,32 +3407,17 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
                     continue;
                 }
 
-                final AnnotationMetadata annotationMetadata = beanDefinitionReference.getAnnotationMetadata();
-                Class<?>[] indexes = annotationMetadata.classValues(INDEXES_TYPE);
-                if (indexes.length > 0) {
-                    //noinspection ForLoopReplaceableByForEach
-                    for (int i = 0; i < indexes.length; i++) {
-                        Class<?> indexedType = indexes[i];
-                        resolveTypeIndex(indexedType).add(beanDefinitionProducer);
-                    }
-                } else {
-                    if (annotationMetadata.hasStereotype(ADAPTER_TYPE)) {
-                        final Class<?> aClass = annotationMetadata.classValue(ADAPTER_TYPE, AnnotationMetadata.VALUE_MEMBER).orElse(null);
-                        if (indexedTypes.contains(aClass)) {
-                            resolveTypeIndex(aClass).add(beanDefinitionProducer);
-                        }
-                    }
+                for (Class<?> indexedType : beanDefinitionReference.getIndexes()) {
+                    resolveTypeIndex(indexedType).add(beanDefinitionProducer);
                 }
                 if (isEagerInit(beanDefinitionReference)) {
                     eagerInitBeans.add(beanDefinitionProducer);
-                } else if (annotationMetadata.hasDeclaredStereotype(PARALLEL_TYPE)) {
+                } else if (beanDefinitionReference.isParallel()) {
                     parallelBeans.add(beanDefinitionProducer);
                 }
-
                 if (beanDefinitionReference.requiresMethodProcessing()) {
                     processedBeans.add(beanDefinitionProducer);
                 }
-
             }
 
             this.beanDefinitionReferences = null;
@@ -3453,7 +3429,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
         return startupBeans;
     }
 
-    private boolean isEagerInit(BeanDefinitionReference beanDefinitionReference) {
+    private boolean isEagerInit(BeanDefinitionReference<?> beanDefinitionReference) {
         return beanDefinitionReference.isContextScope() ||
                 (eagerInitSingletons && beanDefinitionReference.isSingleton()) ||
                 (eagerInitStereotypesPresent && beanDefinitionReference.getAnnotationMetadata().hasDeclaredStereotype(eagerInitStereotypes));
@@ -3461,10 +3437,7 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
 
     @NonNull
     private Collection<BeanDefinitionProducer> resolveTypeIndex(Class<?> indexedType) {
-        return beanIndex.computeIfAbsent(indexedType, aClass -> {
-            indexedTypes.add(indexedType);
-            return new ArrayList<>(20);
-        });
+        return beanIndex.computeIfAbsent(indexedType, COMPUTE_INDEXES_FN);
     }
 
     @SuppressWarnings("unchecked")
@@ -3824,6 +3797,9 @@ public sealed class DefaultBeanContext implements ConfigurableBeanContext permit
         if (configured.compareAndSet(false, true)) {
             readAllBeanConfigurations();
             readBeanDefinitionReferences();
+        }
+        for (Class<?> indexType : KNOWN_INDEX_TYPE) {
+            resolveTypeIndex(indexType);
         }
     }
 
