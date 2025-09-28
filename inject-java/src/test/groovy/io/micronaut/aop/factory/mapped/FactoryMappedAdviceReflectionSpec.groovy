@@ -1,11 +1,9 @@
 package io.micronaut.aop.factory.mapped
 
 import io.micronaut.annotation.processing.test.AbstractTypeElementSpec
-import io.micronaut.aop.Interceptor
 import io.micronaut.context.ApplicationContext
-import io.micronaut.context.RuntimeBeanDefinition
 
-class FactoryMappedAdviceSpec extends AbstractTypeElementSpec {
+class FactoryMappedAdviceReflectionSpec extends AbstractTypeElementSpec {
 
     void "test configuration mapping"() {
         given:
@@ -36,12 +34,7 @@ class MyBean {
     }
 ''')
 
-        applicationContext.registerBeanDefinition(
-                RuntimeBeanDefinition.builder(new TestSingletonInterceptor())
-                    .singleton(true)
-                    .exposedTypes(Interceptor.class, TestSingletonInterceptor.class)
-                    .build()
-        )
+        applicationContext.registerSingleton(new TestSingletonInterceptor())
         def type = applicationContext.classLoader.loadClass('test.MyBean')
         def config = applicationContext.classLoader.loadClass('test.MyConfiguration')
 
