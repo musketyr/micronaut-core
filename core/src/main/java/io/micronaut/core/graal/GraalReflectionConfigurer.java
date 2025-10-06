@@ -68,6 +68,9 @@ public interface GraalReflectionConfigurer extends AnnotationMetadataProvider {
                 final Set<TypeHint.AccessType> accessType = CollectionUtils.setOf(
                     accessTypes
                 );
+                if (accessType.contains(TypeHint.AccessType.DYNAMIC_PROXY)) {
+                    context.registerDynamicProxy(t);
+                }
                 if (accessType.contains(TypeHint.AccessType.ALL_PUBLIC_METHODS)) {
                     final Method[] methods = t.getMethods();
                     for (Method method : methods) {
@@ -196,5 +199,11 @@ public interface GraalReflectionConfigurer extends AnnotationMetadataProvider {
          * @param constructors The constructors
          */
         void register(Constructor<?>... constructors);
+
+        /**
+         * Register a dynamic proxy.
+         * @param proxyClass The proxy class
+         */
+        void registerDynamicProxy(Class<?> proxyClass);
     }
 }
