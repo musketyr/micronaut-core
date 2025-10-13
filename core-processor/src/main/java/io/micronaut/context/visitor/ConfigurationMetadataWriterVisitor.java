@@ -80,6 +80,11 @@ public class ConfigurationMetadataWriterVisitor implements TypeElementVisitor<Co
     }
 
     @Override
+    public Set<String> getSupportedAnnotationNames() {
+        return Set.of(ConfigurationProperties.class.getName(), EachProperty.class.getName(), ConfigurationReader.class.getName(), "io.micronaut.management.endpoint.annotation.Endpoint");
+    }
+
+    @Override
     public void finish(VisitorContext visitorContext) {
         if (metadataBuilder.hasMetadata()) {
             ServiceLoader<ConfigurationMetadataWriter> writers = ServiceLoader.load(ConfigurationMetadataWriter.class, getClass().getClassLoader());
