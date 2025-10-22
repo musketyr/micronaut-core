@@ -100,7 +100,7 @@ public class ConfigurationMetadataBuilder {
         ConfigurationMetadata configurationMetadata = new ConfigurationMetadata();
         configurationMetadata.name = NameUtils.hyphenate(path, true);
         configurationMetadata.type = classElement.getType().getName();
-        configurationMetadata.description = classElement.getDocumentation().orElse(null);
+        configurationMetadata.description = classElement.getDocumentation(true).orElse(null);
         configurationMetadata.includes = CollectionUtils.setOf(classElement.stringValues(ConfigurationReader.class, "includes"));
         configurationMetadata.excludes = CollectionUtils.setOf(classElement.stringValues(ConfigurationReader.class, "excludes"));
         this.configurations.add(configurationMetadata);
@@ -133,7 +133,7 @@ public class ConfigurationMetadataBuilder {
         ConfigurationMetadata configurationMetadata = new ConfigurationMetadata();
         configurationMetadata.name = NameUtils.hyphenate(path, true);
         configurationMetadata.type = builderType.getName();
-        configurationMetadata.description = builderElement.getDocumentation().orElse(null);
+        configurationMetadata.description = builderElement.getDocumentation(true).orElse(null);
         configurationMetadata.includes = CollectionUtils.setOf(builderElement.stringValues(BeanProperties.class, BeanProperties.MEMBER_INCLUDES));
         configurationMetadata.excludes = CollectionUtils.setOf(builderElement.stringValues(BeanProperties.class, BeanProperties.MEMBER_EXCLUDES));
         this.configurations.add(configurationMetadata);
@@ -196,10 +196,9 @@ public class ConfigurationMetadataBuilder {
                                           @Nullable String description,
                                           @Nullable String defaultValue) {
         originatingElements.addOriginatingElement(owningType);
-        originatingElements.addOriginatingElement(declaringType);
 
         PropertyMetadata metadata = new PropertyMetadata();
-        metadata.declaringType = declaringType.getName();
+        metadata.declaringType = owningType.getName();
         metadata.name = name;
         metadata.path = path;
         metadata.type = propertyType.getType().getName();
@@ -207,19 +206,6 @@ public class ConfigurationMetadataBuilder {
         metadata.defaultValue = defaultValue;
         properties.add(metadata);
         return metadata;
-    }
-
-    /**
-     * Finalizes the building process by removing configurations from the list
-     * of configurations that have no associated properties.
-     *
-     * This method iterates over the configurations list and removes any configuration
-     * for which none of the properties in the properties list have a matching
-     * declaring type.
-     */
-    public void finish() {
-        configurations.removeIf(configuration -> properties.stream()
-            .noneMatch(p -> p.getDeclaringType().equals(configuration.getType())));
     }
 
     /**
@@ -236,7 +222,6 @@ public class ConfigurationMetadataBuilder {
                                        ClassElement declaringType,
                                        ClassElement propertyType,
                                        String name) {
-
         if (propertyType.hasStereotype(ConfigurationReader.class)) {
             return ConfigurationUtils.getRequiredTypePath(propertyType);
         }

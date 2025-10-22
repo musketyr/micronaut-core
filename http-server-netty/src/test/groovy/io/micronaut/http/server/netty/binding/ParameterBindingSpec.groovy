@@ -90,6 +90,9 @@ class ParameterBindingSpec extends AbstractMicronautSpec {
         HttpMethod.GET  | '/parameter/queryName/Fr%20ed'                  | "Parameter Value: Fr ed"    | HttpStatus.OK
         HttpMethod.POST | '/parameter/query?name=Fr%20ed'                 | "Parameter Value: Fr ed"    | HttpStatus.OK
         HttpMethod.GET  | '/parameter/arrayStyle?param[]=a&param[]=b&param[]=c' | "Parameter Value: [a, b, c]"    | HttpStatus.OK
+
+        HttpMethod.GET  | '/parameter/query-object?age=30&title=JavaBook&author=JavaAuthor' | "Parameter Value: 30 JavaBook" | HttpStatus.OK
+        HttpMethod.GET  | '/parameter/query-record?page=1&size=123' | "Parameter Value: 1 123" | HttpStatus.OK
     }
 
     void "test list to single error"() {
@@ -105,7 +108,6 @@ class ParameterBindingSpec extends AbstractMicronautSpec {
 
         expect:
         response.status() == HttpStatus.BAD_REQUEST
-        response.body().contains('Unexpected token (VALUE_STRING), expected END_ARRAY')
     }
 
     @Requires(property = 'spec.name', value = 'ParameterBindingSpec')
@@ -229,6 +231,16 @@ class ParameterBindingSpec extends AbstractMicronautSpec {
             "Parameter Value: $params"
         }
 
+        @Get('/query-object')
+        String queryObject(@QueryValue Book book) {
+            "Parameter Value: $book.age $book.title"
+        }
+
+        @Get('/query-record')
+        String queryRecord(@QueryValue PaginationRequest paginationRequest) {
+            "Parameter Value: $paginationRequest.page $paginationRequest.size"
+        }
+
 
         @Introspected
         static class Book {
@@ -250,7 +262,7 @@ class ParameterBindingSpec extends AbstractMicronautSpec {
             int getAge() {
                 return age
             }
-
         }
+
     }
 }

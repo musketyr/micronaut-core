@@ -104,7 +104,7 @@ final class NettyBodyAnnotationBinder<T> extends DefaultBodyAnnotationBinder<T> 
             return super.bindFullBody(context, source);
         }
         if (nhr.byteBody().expectedLength().orElse(-1) == 0) {
-            return BindingResult.empty();
+            return bindDefaultValue(context);
         }
 
         // If there's an error during conversion, the body must stay available, so we split here.

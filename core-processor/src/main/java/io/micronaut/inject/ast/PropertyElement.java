@@ -182,11 +182,14 @@ public interface PropertyElement extends TypedElement, MemberElement {
     }
 
     @Override
-    default Optional<String> getDocumentation() {
+    default Optional<String> getDocumentation(boolean parse) {
+        if (!parse) {
+            return Optional.empty();
+        }
         try {
             Optional<FieldElement> field = getField();
             if (field.isPresent()) {
-                String javadoc = field.get().getDocumentation().orElse(null);
+                String javadoc = field.get().getDocumentation(parse).orElse(null);
                 if (javadoc != null) {
                     return Optional.of(javadoc);
                 }
@@ -194,11 +197,11 @@ public interface PropertyElement extends TypedElement, MemberElement {
             Optional<MethodElement> readMethod = getReadMethod();
             if (readMethod.isPresent()) {
                 MethodElement methodElement = readMethod.get();
-                Optional<String> returnDoc = methodElement.getReturnType().getDocumentation();
+                Optional<String> returnDoc = methodElement.getReturnType().getDocumentation(parse);
                 if (returnDoc.isPresent()) {
                     return returnDoc;
                 }
-                Optional<String> methodDoc = methodElement.getDocumentation();
+                Optional<String> methodDoc = methodElement.getDocumentation(parse);
                 if (methodDoc.isPresent()) {
                     return methodDoc;
                 }
@@ -208,12 +211,12 @@ public interface PropertyElement extends TypedElement, MemberElement {
                 MethodElement methodElement = writeMethod.get();
                 if (methodElement.getParameters().length > 0) {
                     ParameterElement parameter = methodElement.getParameters()[0];
-                    Optional<String> paramDoc = parameter.getDocumentation();
+                    Optional<String> paramDoc = parameter.getDocumentation(parse);
                     if (paramDoc.isPresent()) {
                         return paramDoc;
                     }
                 }
-                Optional<String> methodDoc = methodElement.getDocumentation();
+                Optional<String> methodDoc = methodElement.getDocumentation(parse);
                 if (methodDoc.isPresent()) {
                     return methodDoc;
                 }
