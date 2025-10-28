@@ -1,4 +1,5 @@
 plugins {
+    id("io.micronaut.build.internal.convention-test-library")
     id("org.graalvm.buildtools.native")
     alias(libs.plugins.managed.kotlin.jvm)
     alias(libs.plugins.managed.ksp)
