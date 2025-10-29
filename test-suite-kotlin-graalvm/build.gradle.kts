@@ -52,11 +52,17 @@ graalvmNative {
     }
 }
 
-configurations.testRuntimeClasspath {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "org.jetbrains.kotlin") {
-            useVersion(libs.versions.managed.kotlin.asProvider().get())
+configurations {
+    testRuntimeClasspath {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.kotlin") {
+                useVersion(libs.versions.managed.kotlin.asProvider().get())
+            }
         }
+    }
+    nativeImageTestClasspath {
+        exclude(group = "org.apache.groovy")
+        exclude(group = "org.spockframework")
     }
 }
 
