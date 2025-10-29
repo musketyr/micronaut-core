@@ -38,7 +38,7 @@ tasks {
     }
 
     test {
-        if (JavaVersion.current().majorVersion.toInt() >= 17) {
+        if (JavaVersion.current().majorVersion.toInt() >= 21) {
             jvmArgs(
                 "--add-opens", "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
                 "--add-opens", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
