@@ -32,7 +32,9 @@ dependencies {
 
 tasks {
     compileKotlin {
-        kotlinOptions.jvmTarget = "17"
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+        }
     }
 }
 

@@ -15,8 +15,10 @@ dependencies {
 
 tasks {
     compileKotlin {
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+        }
         kotlinOptions {
-            jvmTarget = "17"
             languageVersion = "1.7"
         }
     }
