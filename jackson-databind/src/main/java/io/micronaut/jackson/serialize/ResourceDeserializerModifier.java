@@ -15,10 +15,11 @@
  */
 package io.micronaut.jackson.serialize;
 
-import com.fasterxml.jackson.databind.BeanDescription;
-import com.fasterxml.jackson.databind.DeserializationConfig;
-import com.fasterxml.jackson.databind.deser.BeanDeserializerModifier;
-import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
+
+import tools.jackson.databind.BeanDescription;
+import tools.jackson.databind.DeserializationConfig;
+import tools.jackson.databind.deser.ValueDeserializerModifier;
+import tools.jackson.databind.introspect.BeanPropertyDefinition;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.http.hateoas.Resource;
 
@@ -29,11 +30,11 @@ import java.util.List;
  * @since 1.0
  */
 @Internal
-public class ResourceDeserializerModifier extends BeanDeserializerModifier {
+public class ResourceDeserializerModifier extends ValueDeserializerModifier {
 
     @Override
-    public List<BeanPropertyDefinition> updateProperties(DeserializationConfig config, BeanDescription beanDesc, List<BeanPropertyDefinition> propDefs) {
-        if (Resource.class.isAssignableFrom(beanDesc.getBeanClass())) {
+    public List<BeanPropertyDefinition> updateProperties(DeserializationConfig config, BeanDescription.Supplier supplier, List<BeanPropertyDefinition> propDefs) {
+        if (Resource.class.isAssignableFrom(supplier.getBeanClass())) {
             for (int i = 0; i < propDefs.size(); i++) {
                 BeanPropertyDefinition definition = propDefs.get(i);
                 if (definition.getName().equals("embedded")) {
@@ -46,7 +47,7 @@ public class ResourceDeserializerModifier extends BeanDeserializerModifier {
 
             return propDefs;
         } else {
-            return super.updateProperties(config, beanDesc, propDefs);
+            return super.updateProperties(config, supplier, propDefs);
         }
     }
 }
