@@ -20,6 +20,7 @@ import io.micronaut.context.annotation.Requires;
 import io.micronaut.core.annotation.Introspected;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import io.micronaut.core.annotation.ReflectiveAccess;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
@@ -91,6 +92,7 @@ public class FormsJacksonAnnotationsTest {
     }
 
     @Introspected
+    @ReflectiveAccess
     record Book(@JsonProperty("title") @NonNull String title, @JsonProperty("paginas") @Nullable Integer pages) {
     }
 
