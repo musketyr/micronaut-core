@@ -20,6 +20,7 @@ import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.io.buffer.ByteBuffer;
+import io.micronaut.core.io.buffer.ReadBuffer;
 import io.micronaut.core.order.OrderUtil;
 import io.micronaut.core.type.Argument;
 import io.micronaut.json.tree.JsonNode;
@@ -66,6 +67,7 @@ public interface JsonMapper {
      * @return The deserialized value.
      * @throws IOException IOException
      */
+    @Nullable
     <T> T readValueFromTree(@NonNull JsonNode tree, @NonNull Argument<T> type) throws IOException;
 
     /**
@@ -77,6 +79,7 @@ public interface JsonMapper {
      * @return The deserialized value.
      * @throws IOException IOException
      */
+    @Nullable
     default <T> T readValueFromTree(@NonNull JsonNode tree, @NonNull Class<T> type) throws IOException {
         return readValueFromTree(tree, Argument.of(type));
     }
@@ -90,6 +93,7 @@ public interface JsonMapper {
      * @return The deserialized object.
      * @throws IOException IOException
      */
+    @Nullable
     <T> T readValue(@NonNull InputStream inputStream, @NonNull Argument<T> type) throws IOException;
 
     /**
@@ -115,6 +119,7 @@ public interface JsonMapper {
      * @return The deserialized object.
      * @throws IOException IOException
      */
+    @Nullable
     <T> T readValue(byte @NonNull [] byteArray, @NonNull Argument<T> type) throws IOException;
 
     /**
@@ -125,9 +130,27 @@ public interface JsonMapper {
      * @param <T> Type variable of the return type.
      * @return The deserialized object.
      * @throws IOException IOException
+     * @deprecated Prefer {@link #readValue(ReadBuffer, Argument)}
      */
+    @Nullable
+    @Deprecated(since = "4.10.24")
     default <T> T readValue(@NonNull ByteBuffer<?> byteBuffer, @NonNull Argument<T> type) throws IOException {
         return readValue(byteBuffer.toByteArray(), type);
+    }
+
+    /**
+     * Parse and map json from the given read buffer.
+     *
+     * @param readBuffer The input data.
+     * @param type       The type to deserialize to.
+     * @param <T>        Type variable of the return type.
+     * @return The deserialized object.
+     * @throws IOException IOException
+     * @since 4.10.24
+     */
+    @Nullable
+    default <T> T readValue(@NonNull ReadBuffer readBuffer, @NonNull Argument<T> type) throws IOException {
+        return readValue(readBuffer.toArray(), type);
     }
 
     /**
@@ -139,6 +162,7 @@ public interface JsonMapper {
      * @return The deserialized object.
      * @throws IOException IOException
      */
+    @Nullable
     default <T> T readValue(@NonNull String string, @NonNull Argument<T> type) throws IOException {
         return readValue(string.getBytes(StandardCharsets.UTF_8), type);
     }
@@ -255,8 +279,7 @@ public interface JsonMapper {
      * @throws IOException If an unrecoverable error occurs
      * @since 4.0.0
      */
-    default @NonNull String writeValueAsString(@NonNull Object object) throws IOException {
-        Objects.requireNonNull(object, "Object cannot be null");
+    default @NonNull String writeValueAsString(@Nullable Object object) throws IOException {
         return new String(writeValueAsBytes(object), StandardCharsets.UTF_8);
     }
 
