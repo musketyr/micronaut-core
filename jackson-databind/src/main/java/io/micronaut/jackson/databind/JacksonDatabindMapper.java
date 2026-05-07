@@ -30,6 +30,7 @@ import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.io.buffer.ByteBuffer;
+import io.micronaut.core.io.buffer.ReadBuffer;
 import io.micronaut.core.reflect.InstantiationUtils;
 import io.micronaut.core.type.Argument;
 import io.micronaut.jackson.JacksonConfiguration;
@@ -176,6 +177,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
+    @Nullable
     public <T> T readValueFromTree(@NonNull JsonNode tree, @NonNull Argument<T> type) throws IOException {
         return createReader(type).readValue(treeAsTokens(tree));
     }
@@ -190,7 +192,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
 
     @NonNull
     @Override
-    public <T> JsonNode writeValueToTree(@NonNull Argument<T> type, T value) throws IOException {
+    public <T> JsonNode writeValueToTree(@NonNull Argument<T> type, @Nullable T value) throws IOException {
         TreeGenerator treeGenerator = treeCodec.createTreeGenerator();
         treeGenerator.setCodec(objectMapper);
         createWriter(type).writeValue(treeGenerator, value);
@@ -198,6 +200,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
+    @Nullable
     public <T> T readValue(@NonNull InputStream inputStream, @NonNull Argument<T> type) throws IOException {
         try {
             return createReader(type).readValue(inputStream);
@@ -207,6 +210,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
+    @Nullable
     public <T> T readValue(byte @NonNull [] byteArray, @NonNull Argument<T> type) throws IOException {
         try {
             return createReader(type).readValue(byteArray);
@@ -216,9 +220,20 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
+    @Nullable
     public <T> T readValue(@NonNull ByteBuffer<?> byteBuffer, @NonNull Argument<T> type) throws IOException {
         try (JsonParser parser = JacksonCoreParserFactory.createJsonParser(objectMapper.getFactory(), byteBuffer)) {
             return createReader(type).readValue(parser);
+        } catch (JsonParseException pe) {
+            throw new JsonSyntaxException(pe);
+        }
+    }
+
+    @Override
+    @Nullable
+    public <T> T readValue(@NonNull ReadBuffer readBuffer, @NonNull Argument<T> type) throws IOException {
+        try {
+            return createReader(type).readValue(readBuffer.toInputStream());
         } catch (JsonParseException pe) {
             throw new JsonSyntaxException(pe);
         }
@@ -230,7 +245,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
-    public <T> void writeValue(@NonNull OutputStream outputStream, @NonNull Argument<T> type, T object) throws IOException {
+    public <T> void writeValue(@NonNull OutputStream outputStream, @NonNull Argument<T> type, @Nullable T object) throws IOException {
         createWriter(type).writeValue(outputStream, object);
     }
 
@@ -240,7 +255,7 @@ public final class JacksonDatabindMapper implements JsonMapper {
     }
 
     @Override
-    public <T> byte[] writeValueAsBytes(@NonNull Argument<T> type, T object) throws IOException {
+    public <T> byte[] writeValueAsBytes(@NonNull Argument<T> type, @Nullable T object) throws IOException {
         return createWriter(type).writeValueAsBytes(object);
     }
 
